@@ -1,0 +1,120 @@
+<h2>채점</h2>
+
+<form id="transcribeForm">
+  <input type="file" name="file" accept="image/*" required>
+  <button type="submit">사진 전사(OCR)</button>
+</form>
+<pre id="transcribeStatus"></pre>
+
+<div>
+  <label>과목
+    <select id="subjectSelect"><option value="">선택</option></select>
+  </label>
+  <label>시험
+    <select id="examSelect" disabled><option value="">과목 먼저 선택</option></select>
+  </label>
+  <button id="gradeBtn" type="button" disabled>채점하기</button>
+</div>
+<pre id="gradeStatus"></pre>
+<div id="gradeResult"></div>
+
+<script src="/static/common.js"></script>
+<script>
+let transcribedQuestions = null;
+
+document.getElementById("transcribeForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const formData = new FormData(e.target);
+  const statusEl = document.getElementById("transcribeStatus");
+
+  statusEl.textContent = "전사 요청 중... (MinerU OCR + LLM 구조화, 시간이 걸릴 수 있음)";
+  statusEl.style.color = "";
+  statusEl.style.background = "";
+  transcribedQuestions = null;
+  updateGradeButton();
+
+  const result = await callApi("/transcribe", { method: "POST", body: formData });
+  showStatus(statusEl, result, "전사 완료");
+  if (result.ok) {
+    transcribedQuestions = result.body.questions;
+    if (!transcribedQuestions || transcribedQuestions.length === 0) {
+      statusEl.textContent += "\n\n(경고: 문항을 하나도 못 뽑았습니다)";
+    }
+  }
+  updateGradeButton();
+});
+
+async function loadSubjects() {
+  const result = await callApi("/subjects");
+  const select = document.getElementById("subjectSelect");
+  if (!result.ok) {
+    select.innerHTML = '<option value="">과목 목록 로딩 실패</option>';
+    return;
+  }
+  result.body.forEach((s) => {
+    const opt = document.createElement("option");
+    opt.value = s.id;
+    opt.textContent = s.name;
+    select.appendChild(opt);
+  });
+}
+loadSubjects();
+
+document.getElementById("subjectSelect").addEventListener("change", async (e) => {
+  const examSelect = document.getElementById("examSelect");
+  examSelect.innerHTML = '<option value="">선택</option>';
+  examSelect.disabled = !e.target.value;
+  updateGradeButton();
+  if (!e.target.value) return;
+
+  const result = await callApi(`/subjects/${e.target.value}/exams`);
+  if (!result.ok) {
+    examSelect.innerHTML = '<option value="">시험 목록 로딩 실패</option>';
+    return;
+  }
+  result.body.forEach((ex) => {
+    const opt = document.createElement("option");
+    opt.value = ex.id;
+    opt.textContent = ex.name;
+    examSelect.appendChild(opt);
+  });
+});
+
+document.getElementById("examSelect").addEventListener("change", updateGradeButton);
+
+function updateGradeButton() {
+  const examId = document.getElementById("examSelect").value;
+  document.getElementById("gradeBtn").disabled = !(transcribedQuestions && examId);
+}
+
+document.getElementById("gradeBtn").addEventListener("click", async () => {
+  const examId = Number(document.getElementById("examSelect").value);
+  const statusEl = document.getElementById("gradeStatus");
+  const container = document.getElementById("gradeResult");
+  container.innerHTML = "";
+  statusEl.textContent = "채점 요청 중...";
+  statusEl.style.color = "";
+  statusEl.style.background = "";
+
+  const result = await callApi("/grade", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ exam_id: examId, questions: transcribedQuestions }),
+  });
+  showStatus(statusEl, result, "채점 완료");
+  if (!result.ok) return;
+
+  result.body.results.forEach((q) => {
+    const row = document.createElement("p");
+    row.style.padding = "6px";
+    if (q.status === "missing_reference") {
+      row.textContent = `${q.number}번: DB에 정답 없음 (직접 입력 필요)`;
+      row.style.background = "#fff4dd";
+    } else {
+      row.textContent = `${q.number}번: ${q.is_correct ? "정답" : "오답"} - ${q.feedback ?? ""}`;
+      row.style.background = q.is_correct ? "#eafbf0" : "#fdeaea";
+    }
+    container.appendChild(row);
+  });
+});
+</script>

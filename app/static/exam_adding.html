@@ -1,0 +1,85 @@
+<h2>시험 등록</h2>
+
+<form id="previewForm">
+  <input type="text" name="subject_name" placeholder="과목명" required>
+  <input type="text" name="exam_name" placeholder="시험명" required>
+  <label>시험지 파일 <input type="file" name="exam_file" required></label>
+  <label>정답지 파일 <input type="file" name="answer_file" required></label>
+  <button type="submit">미리보기</button>
+</form>
+<pre id="previewStatus"></pre>
+
+<div id="previewArea" style="display:none">
+  <h3>문항 확인/수정 후 확정</h3>
+  <div id="questionRows"></div>
+  <button id="confirmBtn" type="button">확정</button>
+</div>
+<pre id="confirmStatus"></pre>
+
+<script src="/static/common.js"></script>
+<script>
+let previewState = null; // { preview_id, subject_name, exam_name }
+
+document.getElementById("previewForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const formData = new FormData(e.target);
+  const statusEl = document.getElementById("previewStatus");
+  const previewArea = document.getElementById("previewArea");
+
+  statusEl.textContent = "미리보기 요청 중... (MinerU OCR + LLM 구조화, 시간이 걸릴 수 있음)";
+  statusEl.style.color = "";
+  statusEl.style.background = "";
+  previewArea.style.display = "none";
+
+  const result = await callApi("/exams/preview", { method: "POST", body: formData });
+  showStatus(statusEl, result, "미리보기 완료");
+  if (!result.ok) return;
+
+  const data = result.body;
+  previewState = {
+    preview_id: data.preview_id,
+    subject_name: data.subject_name,
+    exam_name: data.exam_name,
+  };
+
+  const rows = document.getElementById("questionRows");
+  rows.innerHTML = "";
+  if (!data.questions || data.questions.length === 0) {
+    rows.textContent = "문항을 하나도 못 뽑았습니다. OCR/LLM 결과를 확인하세요.";
+  }
+  (data.questions ?? []).forEach((q) => {
+    const row = document.createElement("fieldset");
+    row.className = "question-row";
+    row.innerHTML = `
+      <legend>문항</legend>
+      <input class="q-number" value="${q.number ?? ""}" placeholder="번호">
+      <textarea class="q-text" placeholder="문항 본문">${q.question_text ?? ""}</textarea>
+      <input class="q-answer" value="${q.answer ?? ""}" placeholder="정답">
+      <textarea class="q-explanation" placeholder="해설">${q.explanation ?? ""}</textarea>
+    `;
+    rows.appendChild(row);
+  });
+  previewArea.style.display = "block";
+});
+
+document.getElementById("confirmBtn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("confirmStatus");
+  const questions = [...document.querySelectorAll(".question-row")].map((row) => ({
+    number: row.querySelector(".q-number").value,
+    question_text: row.querySelector(".q-text").value || null,
+    answer: row.querySelector(".q-answer").value || null,
+    explanation: row.querySelector(".q-explanation").value || null,
+  }));
+
+  statusEl.textContent = "확정 요청 중...";
+  statusEl.style.color = "";
+  statusEl.style.background = "";
+
+  const result = await callApi("/exams/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...previewState, questions }),
+  });
+  showStatus(statusEl, result, "시험 등록 완료 - 이 exam_id를 채점 화면에서 사용하세요");
+});
+</script>

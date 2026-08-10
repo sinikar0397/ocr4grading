@@ -3,7 +3,11 @@ import os
 
 from openai import OpenAI
 
-MODEL = os.environ.get("GRADING_MODEL", "gpt-4o-mini")
+MODEL = os.environ.get("GRADING_MODEL", "gemini-flash-latest")
+
+# Gemini exposes an OpenAI-compatible endpoint, so the OpenAI SDK works
+# unmodified against it: https://ai.google.dev/gemini-api/docs/openai
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 _client: OpenAI | None = None
 
@@ -11,7 +15,7 @@ _client: OpenAI | None = None
 def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        _client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+        _client = OpenAI(api_key=os.environ["GEMINI_API_KEY"], base_url=GEMINI_BASE_URL)
     return _client
 
 
@@ -22,6 +26,7 @@ STRUCTURE_PROMPT = """\
 
 {"questions": [
   {"number": "문제 번호 (문자열)",
+   "question_text": "문제 본문/지문 (시험지 OCR인 경우; 없으면 null)",
    "answer": "최종 정답 또는 학생이 적은 최종 답 (없으면 null)",
    "solution": "풀이 과정 (없으면 null)",
    "explanation": "해설/정답 근거 (없으면 null)"}

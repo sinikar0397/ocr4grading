@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+
+# local SQLite DB + uploaded exam files (regenerated at runtime, not source)
+exam.db
+data/
+
+# secrets
+.env
+
+.DS_Store
+.vscode/
+.idea/
