@@ -1,5 +1,7 @@
 import tempfile
 from pathlib import Path
+import pypdfium2 as pdfium
+import glob
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -8,10 +10,12 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .src.db import Exam, Question, Subject, get_db, get_or_create_subject, init_db
-from .src.llm import grade_pairs, structure_questions
+from .src.llm import grade_pairs, STRUCTURE_PROMPT_DICT, GRADE_PROMPT_DICT, _chat_json
 from .src.matching import merge_by_number, pair_questions
 from .src.ocr import run_mineru
-from .src.storage import new_preview_id, promote_to_exam, save_upload
+from .src.storage import new_preview_id, promote_to_exam,\
+    save_upload_pending_exam, save_upload_pending_page,\
+    read_pending_page, save_upload_pending_question, exam_dir
 
 app = FastAPI(title="Exam Grading Service")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -21,19 +25,11 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 def on_startup() -> None:
     init_db()
 
-
-class QuestionDraft(BaseModel):
-    number: str
-    question_text: str | None = None
-    answer: str | None = None
-    explanation: str | None = None
-
-
 class ConfirmExamRequest(BaseModel):
     preview_id: str
     subject_name: str
     exam_name: str
-    questions: list[QuestionDraft]
+    num_questions : int
 
 
 class StudentQuestion(BaseModel):
@@ -45,7 +41,6 @@ class StudentQuestion(BaseModel):
 class GradeRequest(BaseModel):
     exam_id: int
     questions: list[StudentQuestion]
-
 
 @app.get("/subjects")
 def list_subjects(db: Session = Depends(get_db)):
@@ -60,38 +55,88 @@ def list_exams(subject_id: int, db: Session = Depends(get_db)):
     return [{"id": e.id, "name": e.name} for e in subject.exams]
 
 
-@app.post("/exams/preview")
-def preview_exam(
+@app.post("/exams/save")
+def save_exam(
     subject_name: str = Form(...),
     exam_name: str = Form(...),
     exam_file: UploadFile = File(...),
-    answer_file: UploadFile = File(...),
+    answer_file: UploadFile = File(...)
 ):
     """OCR + structure a exam/answer-key pair without touching the DB yet."""
     preview_id = new_preview_id()
-    exam_path = save_upload(preview_id, "exam", exam_file.filename, exam_file.file.read())
-    answer_path = save_upload(preview_id, "answer", answer_file.filename, answer_file.file.read())
+    exam_path = save_upload_pending_exam(preview_id, "exam", exam_file.filename, exam_file.file.read())
+    answer_path = save_upload_pending_exam(preview_id, "answer", answer_file.filename, answer_file.file.read())
 
-    exam_questions = structure_questions(run_mineru(str(exam_path)))
-    answer_questions = structure_questions(run_mineru(str(answer_path)))
-    questions = merge_by_number(exam_questions, answer_questions)
-
+    exam_pdf = pdfium.PdfDocument(exam_path)
+    answer_pdf = pdfium.PdfDocument(answer_path)
+    for exam_index, exam_page in enumerate(exam_pdf):
+        save_upload_pending_page(preview_id, "exam", exam_index, exam_page)
+    for answer_index, answer_page in enumerate(answer_pdf):
+        save_upload_pending_page(preview_id, "answer", answer_index, answer_page)
     return {
-        "preview_id": preview_id,
-        "subject_name": subject_name,
-        "exam_name": exam_name,
-        "questions": questions,
+        "preview_id" : preview_id,
+        "subject_name" : subject_name,
+        "exam_name" : exam_name
     }
+
+@app.post("/exams/crop")
+def crop_exam(
+    preview_id : str = Form(...),
+    field : str = Form(...),
+    page_index : int = Form(...),
+    x : int = Form(...),
+    y : int = Form(...),
+    w : int = Form(...),
+    h : int = Form(...)
+):
+    if field not in ['exam', 'answer']:
+        raise HTTPException(400, "Wrong query : field is nor exam, answer")
+    base_image = read_pending_page(preview_id)
+    box = [x, y, x + w, y + h]
+    crop_image = base_image.crop(box)
+    save_upload_pending_question(preview_id, "field", page_index, crop_image)
+
+def structure_questions(exam_id : int, number : int) -> Question:
+    root_path = exam_dir(exam_id)
+    question_path = root_path / "questions" / f'exam_{number}.png'
+    answer_path   = root_path / "questions" / f'answer_{number}.png'
+
+    question_text = run_mineru(question_path)
+    answer_text   = run_mineru(answer_path)
+    correct_answer = _chat_json(
+        system_prompt = STRUCTURE_PROMPT_DICT["answer"],
+        payload = f"""
+            시험지 : {question_text}\n\n\n
+            모범답안 : {answer_text}
+            """
+    )
+    explanation = _chat_json(
+        system_prompt = STRUCTURE_PROMPT_DICT["explanation"],
+        payload = f"""
+            시험지 : {question_text}\n\n\n
+            모범답안 : {answer_text}
+            """
+    )
+    return Question(
+        exam_id = exam_id,
+        number = number,
+        question_file_path = question_path,
+        answer_file_path   = answer_path,
+        question_text  = question_text,
+        correct_answer = correct_answer,
+        explanation    = explanation
+    )
+    
 
 
 @app.post("/exams/confirm")
 def confirm_exam(payload: ConfirmExamRequest, db: Session = Depends(get_db)):
     """Persist a previewed exam, using whatever edits the user made to the draft."""
+
     subject = get_or_create_subject(db, payload.subject_name)
-    exam = Exam(subject_id=subject.id, name=payload.exam_name)
+    exam = Exam(subject_id=subject.id, name=payload.exam_name, num_questions=payload.num_questions)
     db.add(exam)
     db.flush()
-
     try:
         paths = promote_to_exam(payload.preview_id, exam.id)
     except FileNotFoundError:
@@ -101,14 +146,8 @@ def confirm_exam(payload: ConfirmExamRequest, db: Session = Depends(get_db)):
     exam.exam_file_path = paths.get("exam")
     exam.answer_file_path = paths.get("answer")
 
-    for q in payload.questions:
-        db.add(Question(
-            exam_id=exam.id,
-            number=q.number,
-            question_text=q.question_text,
-            correct_answer=q.answer,
-            explanation=q.explanation,
-        ))
+    for index in range(payload.num_questions):
+        db.add(structure_questions(exam.id, index))
     db.commit()
     return {"exam_id": exam.id}
 
@@ -137,6 +176,8 @@ def set_answer(
 
 @app.post("/transcribe")
 def transcribe(file: UploadFile = File(...)):
+    # 수정해야함 structure_question 이상
+    # todo
     """OCR a student's solved-exam photo into per-question answers. DB-independent."""
     suffix = Path(file.filename or "").suffix
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
