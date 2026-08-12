@@ -1,11 +1,5 @@
 <h2>채점</h2>
 
-<form id="transcribeForm">
-  <input type="file" name="file" accept="image/*" required>
-  <button type="submit">사진 전사(OCR)</button>
-</form>
-<pre id="transcribeStatus"></pre>
-
 <div>
   <label>과목
     <select id="subjectSelect"><option value="">선택</option></select>
@@ -13,36 +7,44 @@
   <label>시험
     <select id="examSelect" disabled><option value="">과목 먼저 선택</option></select>
   </label>
-  <button id="gradeBtn" type="button" disabled>채점하기</button>
+</div>
+<pre id="examStatus"></pre>
+
+<div id="transcribeArea" style="display:none">
+  <h3 id="transcribeTitle"></h3>
+
+  <div>
+    <label>사진 선택 (문제별로 따로 찍거나, 한 장에 여러 문제가 있으면 영역만 다시 지정)
+      <input type="file" id="photoInput" accept="image/*" capture="environment">
+    </label>
+  </div>
+
+  <div id="cropWorkArea" style="display:none">
+    <p>이미지 위에서 드래그해서 이 문제의 답 영역을 지정하세요. 사진 한 장이 문제 하나뿐이면 "전체 이미지 사용"을 누르세요.</p>
+    <div id="imgWrap" style="position:relative; display:inline-block; border:1px solid #ccc;">
+      <img id="sourceImg" draggable="false" style="max-width:700px; display:block; user-select:none;">
+      <div id="selBox" style="position:absolute; border:2px solid #e03131; background:rgba(224,49,49,0.15); display:none; pointer-events:none;"></div>
+    </div>
+    <div>
+      <button type="button" id="useFullBtn">전체 이미지 사용</button>
+      <button type="button" id="transcribeBtn" disabled>이 영역으로 전사</button>
+      <button type="button" id="skipBtn">건너뛰기</button>
+    </div>
+  </div>
+  <pre id="transcribeStatus"></pre>
+
+  <h4>진행 상황</h4>
+  <ul id="taskList"></ul>
+
+  <button type="button" id="gradeBtn" style="display:none">채점하기</button>
 </div>
 <pre id="gradeStatus"></pre>
 <div id="gradeResult"></div>
 
 <script src="/static/common.js"></script>
 <script>
-let transcribedQuestions = null;
-
-document.getElementById("transcribeForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const formData = new FormData(e.target);
-  const statusEl = document.getElementById("transcribeStatus");
-
-  statusEl.textContent = "전사 요청 중... (MinerU OCR + LLM 구조화, 시간이 걸릴 수 있음)";
-  statusEl.style.color = "";
-  statusEl.style.background = "";
-  transcribedQuestions = null;
-  updateGradeButton();
-
-  const result = await callApi("/transcribe", { method: "POST", body: formData });
-  showStatus(statusEl, result, "전사 완료");
-  if (result.ok) {
-    transcribedQuestions = result.body.questions;
-    if (!transcribedQuestions || transcribedQuestions.length === 0) {
-      statusEl.textContent += "\n\n(경고: 문항을 하나도 못 뽑았습니다)";
-    }
-  }
-  updateGradeButton();
-});
+let state = null;
+let sourceImgEl = null; // 현재 로드된 원본 사진 (HTMLImageElement)
 
 async function loadSubjects() {
   const result = await callApi("/subjects");
@@ -64,7 +66,7 @@ document.getElementById("subjectSelect").addEventListener("change", async (e) =>
   const examSelect = document.getElementById("examSelect");
   examSelect.innerHTML = '<option value="">선택</option>';
   examSelect.disabled = !e.target.value;
-  updateGradeButton();
+  document.getElementById("transcribeArea").style.display = "none";
   if (!e.target.value) return;
 
   const result = await callApi(`/subjects/${e.target.value}/exams`);
@@ -75,20 +77,186 @@ document.getElementById("subjectSelect").addEventListener("change", async (e) =>
   result.body.forEach((ex) => {
     const opt = document.createElement("option");
     opt.value = ex.id;
+    opt.dataset.numQuestions = ex.num_questions;
     opt.textContent = ex.name;
     examSelect.appendChild(opt);
   });
 });
 
-document.getElementById("examSelect").addEventListener("change", updateGradeButton);
+document.getElementById("examSelect").addEventListener("change", (e) => {
+  document.getElementById("transcribeArea").style.display = "none";
+  document.getElementById("gradeResult").innerHTML = "";
+  document.getElementById("gradeStatus").textContent = "";
+  if (!e.target.value) return;
 
-function updateGradeButton() {
-  const examId = document.getElementById("examSelect").value;
-  document.getElementById("gradeBtn").disabled = !(transcribedQuestions && examId);
+  const opt = e.target.selectedOptions[0];
+  const numQuestions = Number(opt.dataset.numQuestions);
+  if (!numQuestions) {
+    showStatus(document.getElementById("examStatus"),
+      { ok: false, status: 0, message: "이 시험은 문항 수 정보가 없습니다." });
+    return;
+  }
+  document.getElementById("examStatus").textContent = "";
+
+  const tasks = [];
+  for (let n = 0; n < numQuestions; n++) {
+    tasks.push({ number: n, done: false, solution: null });
+  }
+  state = { exam_id: Number(e.target.value), num_questions: numQuestions, tasks, taskIndex: 0 };
+  sourceImgEl = null;
+
+  document.getElementById("transcribeArea").style.display = "block";
+  document.getElementById("gradeBtn").style.display = "none";
+  renderTaskList();
+  loadTask();
+});
+
+function currentTask() {
+  return state.tasks[state.taskIndex];
+}
+
+function loadTask() {
+  const task = currentTask();
+  renderTaskList();
+  if (!task) {
+    document.getElementById("transcribeTitle").textContent = "모든 문항 전사 완료";
+    document.getElementById("cropWorkArea").style.display = "none";
+    document.getElementById("gradeBtn").style.display = "inline-block";
+    return;
+  }
+  document.getElementById("transcribeTitle").textContent = `문제 ${task.number + 1} / ${state.num_questions} 답 전사`;
+  document.getElementById("gradeBtn").style.display = "none";
+  if (sourceImgEl) {
+    document.getElementById("cropWorkArea").style.display = "block";
+    hideSelection();
+  } else {
+    document.getElementById("cropWorkArea").style.display = "none";
+  }
+}
+
+document.getElementById("photoInput").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const img = document.getElementById("sourceImg");
+  img.onload = () => { sourceImgEl = img; loadTask(); };
+  img.src = URL.createObjectURL(file);
+});
+
+// 드래그로 영역 선택 (exam_adding.html과 동일한 방식)
+const imgWrap = document.getElementById("imgWrap");
+const pageImg = document.getElementById("sourceImg");
+const selBox = document.getElementById("selBox");
+let dragStart = null;
+let selection = null; // 화면에 표시된 픽셀 기준 {x, y, w, h}
+
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+pageImg.addEventListener("mousedown", (e) => {
+  const rect = pageImg.getBoundingClientRect();
+  dragStart = { x: clamp(e.clientX - rect.left, 0, rect.width), y: clamp(e.clientY - rect.top, 0, rect.height) };
+  selection = { x: dragStart.x, y: dragStart.y, w: 0, h: 0 };
+  selBox.style.display = "block";
+  updateSelBox();
+});
+imgWrap.addEventListener("mousemove", (e) => {
+  if (!dragStart) return;
+  const rect = pageImg.getBoundingClientRect();
+  const curX = clamp(e.clientX - rect.left, 0, rect.width);
+  const curY = clamp(e.clientY - rect.top, 0, rect.height);
+  selection = {
+    x: Math.min(dragStart.x, curX),
+    y: Math.min(dragStart.y, curY),
+    w: Math.abs(curX - dragStart.x),
+    h: Math.abs(curY - dragStart.y),
+  };
+  updateSelBox();
+});
+window.addEventListener("mouseup", () => {
+  if (!dragStart) return;
+  dragStart = null;
+  document.getElementById("transcribeBtn").disabled = !(selection && selection.w > 3 && selection.h > 3);
+});
+
+function updateSelBox() {
+  selBox.style.left = selection.x + "px";
+  selBox.style.top = selection.y + "px";
+  selBox.style.width = selection.w + "px";
+  selBox.style.height = selection.h + "px";
+}
+function hideSelection() {
+  selection = null;
+  selBox.style.display = "none";
+  document.getElementById("transcribeBtn").disabled = true;
+}
+
+document.getElementById("useFullBtn").addEventListener("click", () => {
+  selection = { x: 0, y: 0, w: pageImg.clientWidth, h: pageImg.clientHeight };
+  selBox.style.display = "block";
+  updateSelBox();
+  document.getElementById("transcribeBtn").disabled = false;
+});
+
+function cropToBlob(img, box) {
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(box.w));
+  canvas.height = Math.max(1, Math.round(box.h));
+  canvas.getContext("2d").drawImage(img, box.x, box.y, box.w, box.h, 0, 0, canvas.width, canvas.height);
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+}
+
+document.getElementById("transcribeBtn").addEventListener("click", async () => {
+  const task = currentTask();
+  const scale = pageImg.naturalWidth / pageImg.clientWidth;
+  const box = {
+    x: selection.x * scale, y: selection.y * scale,
+    w: selection.w * scale, h: selection.h * scale,
+  };
+  const blob = await cropToBlob(pageImg, box);
+
+  const body = new FormData();
+  body.append("number", task.number);
+  body.append("file", blob, `q${task.number}.png`);
+
+  const statusEl = document.getElementById("transcribeStatus");
+  statusEl.textContent = "전사 중... (OCR, 시간이 걸릴 수 있음)";
+  statusEl.style.color = "";
+  statusEl.style.background = "";
+
+  const result = await callApi("/transcribe", { method: "POST", body });
+  showStatus(statusEl, result, "전사 완료");
+  if (!result.ok) return;
+
+  task.done = true;
+  task.solution = result.body.answer.solution;
+  state.taskIndex++;
+  loadTask();
+});
+
+document.getElementById("skipBtn").addEventListener("click", () => {
+  state.taskIndex++;
+  loadTask();
+});
+
+function renderTaskList() {
+  const ul = document.getElementById("taskList");
+  ul.innerHTML = "";
+  state.tasks.forEach((t, i) => {
+    const li = document.createElement("li");
+    li.textContent = `문제 ${t.number + 1} : ${t.done ? "완료" : "대기"}`;
+    li.style.cursor = "pointer";
+    li.style.color = t.done ? "#0a7a2f" : (i === state.taskIndex ? "#0057cc" : "#666");
+    li.style.fontWeight = i === state.taskIndex ? "bold" : "normal";
+    li.addEventListener("click", () => {
+      state.taskIndex = i;
+      loadTask();
+    });
+    ul.appendChild(li);
+  });
 }
 
 document.getElementById("gradeBtn").addEventListener("click", async () => {
-  const examId = Number(document.getElementById("examSelect").value);
   const statusEl = document.getElementById("gradeStatus");
   const container = document.getElementById("gradeResult");
   container.innerHTML = "";
@@ -96,10 +264,14 @@ document.getElementById("gradeBtn").addEventListener("click", async () => {
   statusEl.style.color = "";
   statusEl.style.background = "";
 
+  const questions = state.tasks
+    .filter((t) => t.done)
+    .map((t) => ({ number: String(t.number), solution: t.solution }));
+
   const result = await callApi("/grade", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ exam_id: examId, questions: transcribedQuestions }),
+    body: JSON.stringify({ exam_id: state.exam_id, questions }),
   });
   showStatus(statusEl, result, "채점 완료");
   if (!result.ok) return;
@@ -108,10 +280,10 @@ document.getElementById("gradeBtn").addEventListener("click", async () => {
     const row = document.createElement("p");
     row.style.padding = "6px";
     if (q.status === "missing_reference") {
-      row.textContent = `${q.number}번: DB에 정답 없음 (직접 입력 필요)`;
+      row.textContent = `${Number(q.number) + 1}번: DB에 정답 없음 (직접 입력 필요)`;
       row.style.background = "#fff4dd";
     } else {
-      row.textContent = `${q.number}번: ${q.is_correct ? "정답" : "오답"} - ${q.feedback ?? ""}`;
+      row.textContent = `${Number(q.number) + 1}번: ${q.is_correct ? "정답" : "오답"} - ${q.feedback ?? ""}`;
       row.style.background = q.is_correct ? "#eafbf0" : "#fdeaea";
     }
     container.appendChild(row);

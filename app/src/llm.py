@@ -43,11 +43,10 @@ GRADE_PROMPT_DICT = {
 }
 
 
-def _chat_json(system_prompt: str, payload: str) -> dict:
+def _chat_json(system_prompt: str, payload: str) -> str:
     client = _get_client()
     resp = client.chat.completions.create(
         model=MODEL,
-        response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": payload},
@@ -65,7 +64,7 @@ def grade_pairs(pairs: list[dict]) -> list[dict]:
     graded = [
         {
             "number" : g["number"],
-            "is_correct" : _chat_json(GRADE_PROMPT_DICT["is_correct"], json.dumps(g)),
+            "is_correct" : _chat_json(GRADE_PROMPT_DICT["is_correct"], json.dumps(g)).strip().lower() == "true",
             "feedback" : _chat_json(GRADE_PROMPT_DICT["feedback"], json.dumps(g))
         }
         for g in to_grade

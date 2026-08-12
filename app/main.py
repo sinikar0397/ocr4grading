@@ -10,12 +10,12 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .src.db import Exam, Question, Subject, get_db, get_or_create_subject, init_db
-from .src.llm import grade_pairs, STRUCTURE_PROMPT_DICT, GRADE_PROMPT_DICT, _chat_json
-from .src.matching import merge_by_number, pair_questions
+from .src.llm import grade_pairs, GRADE_PROMPT_DICT, _chat_json
+from .src.matching import pair_questions
 from .src.ocr import run_mineru
 from .src.storage import new_preview_id, promote_to_exam,\
     save_upload_pending_exam, save_upload_pending_page,\
-    read_pending_page, save_upload_pending_question, exam_dir
+    read_pending_page, save_upload_pending_question, exam_dir, pending_page_dir
 
 app = FastAPI(title="Exam Grading Service")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -51,7 +51,7 @@ def list_exams(subject_id: int, db: Session = Depends(get_db)):
     subject = db.get(Subject, subject_id)
     if not subject:
         raise HTTPException(404, "subject not found")
-    return [{"id": e.id, "name": e.name} for e in subject.exams]
+    return [{"id": e.id, "name": e.name, "num_questions": e.num_questions} for e in subject.exams]
 
 
 @app.post("/exams/save")
@@ -75,38 +75,53 @@ def save_exam(
     return {
         "preview_id" : preview_id,
         "subject_name" : subject_name,
-        "exam_name" : exam_name
+        "exam_name" : exam_name,
+        "exam_pages" : len(exam_pdf),
+        "answer_pages" : len(answer_pdf),
     }
+
+@app.get("/exams/preview/{preview_id}/pages/{field}/{page_index}")
+def get_pending_page(preview_id: str, field: str, page_index: int):
+    """Serve one OCR-source page image so the crop UI can page through exam/answer sheets."""
+    if field not in ['exam', 'answer']:
+        raise HTTPException(400, "Wrong query : field is nor exam, answer")
+    path = pending_page_dir(preview_id) / f"{field}_{page_index}.png"
+    if not path.exists():
+        raise HTTPException(404, "page not found")
+    return FileResponse(path)
 
 @app.post("/exams/crop")
 def crop_exam(
     preview_id : str = Form(...),
     field : str = Form(...),
+    number : int = Form(...),
     page_index : int = Form(...),
     x : int = Form(...),
     y : int = Form(...),
     w : int = Form(...),
     h : int = Form(...)
 ):
+    """Crop question `number`'s answer/question box out of page `page_index`."""
     if field not in ['exam', 'answer']:
         raise HTTPException(400, "Wrong query : field is nor exam, answer")
-    base_image = read_pending_page(preview_id)
+    base_image = read_pending_page(preview_id, field, page_index)
     box = [x, y, x + w, y + h]
     crop_image = base_image.crop(box)
-    save_upload_pending_question(preview_id, "field", page_index, crop_image)
+    dest = save_upload_pending_question(preview_id, field, number, crop_image)
+    return {"path": str(dest)}
 
 def structure_questions(exam_id : int, number : int) -> Question:
     root_path = exam_dir(exam_id)
-    question_path = root_path / "questions" / f'exam_{number}.png'
-    answer_path   = root_path / "questions" / f'answer_{number}.png'
+    question_path = root_path / "question" / f'exam_{number}.png'
+    answer_path   = root_path / "question" / f'answer_{number}.png'
 
     question_text = run_mineru(question_path)
     answer_text   = run_mineru(answer_path)
     return Question(
         exam_id = exam_id,
         number = number,
-        question_file_path = question_path,
-        answer_file_path   = answer_path,
+        question_file_path = str(question_path),
+        answer_file_path   = str(answer_path),
         question_text  = question_text,
         answer_text    = answer_text
     )
@@ -151,7 +166,7 @@ def set_answer(
     if question is None:
         question = Question(exam_id=exam_id, number=number)
         db.add(question)
-    db.answer_text = answer_text
+    question.answer_text = answer_text
     db.commit()
     return {"exam_id": exam_id, "number": number, "answer_text" : answer_text}
 
@@ -163,8 +178,8 @@ def transcribe(number : int = File(...), file: UploadFile = File(...)):
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(file.file.read())
         text = run_mineru(tmp.name)
-    return {"questions": StudentAnswer(
-        number = number,
+    return {"answer": StudentAnswer(
+        number = str(number),
         solution = text
     )}
 

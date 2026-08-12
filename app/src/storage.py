@@ -13,7 +13,7 @@ def pending_exam_dir(preview_id: str) -> Path:
     return PENDING_DIR / preview_id
 
 def exam_dir(exam_id: int) -> Path:
-    return EXAMS_DIR / exam_id
+    return EXAMS_DIR / str(exam_id)
 
 def pending_page_dir(preview_id: str) -> Path:
     return pending_exam_dir(preview_id) /  "pages"
@@ -26,7 +26,7 @@ def new_preview_id() -> str:
 
 def save_upload(directory: Path, filename: str, content: bytes) -> Path:
     """save uploaded file's bytes and return it's path"""
-    directory.makedir(parents=True, exist_ok=True)
+    directory.mkdir(parents=True, exist_ok=True)
     dest = directory / filename
     dest.write_bytes(content)
     return dest
@@ -40,21 +40,34 @@ def save_upload_pending_exam(preview_id: str, field: str, filename: str, content
 def save_upload_pending_page(preview_id: str, field: str, index: int, page: PdfPage) -> Path:
     """Save an uploaded file(probably image)'s bytes under data/_pending/<preview_id>/pages/<filed>_<index>.png."""
     directory = pending_page_dir(preview_id)
+    directory.mkdir(parents=True, exist_ok=True)
     dest = directory / f"{field}_{index}.png"
-    page.render(sclae=2).to_pil().save(dest)
+    page.render(scale=2).to_pil().save(dest)
     return dest
 
 def read_pending_page(preview_id: str, field: str, index: int) -> Image:
     """read data/_pending/<preview_id>/pages/<filed>_page_<index>.png"""
     directory = pending_page_dir(preview_id)
-    page_path = directory / "{field}_{index}.png"
+    page_path = directory / f"{field}_{index}.png"
     return Image.open(page_path)
 
 def save_upload_pending_question(preview_id : str, field: str, index: int, image: Image) -> Path:
-    """Save an uploaded Image under data/_pending/<preview_id>/questions/<filed>_<index>.png."""
+    """Save an uploaded Image under data/_pending/<preview_id>/questions/<filed>_<index>.png.
+
+    If this question already has a crop (e.g. the prompt and the question body
+    were cropped separately), stack the new one below it instead of overwriting.
+    """
     directory = pending_question_dir(preview_id)
-    dest = directory / "{field}_{index}.png"
-    image.render(scale=2).to_pil().save(dest)
+    directory.mkdir(parents=True, exist_ok=True)
+    dest = directory / f"{field}_{index}.png"
+    if dest.exists():
+        existing = Image.open(dest)
+        width = max(existing.width, image.width)
+        stacked = Image.new("RGB", (width, existing.height + image.height), "white")
+        stacked.paste(existing, (0, 0))
+        stacked.paste(image, (0, existing.height))
+        image = stacked
+    image.save(dest)
     return dest
 
 def resolved_paths(directory: Path) -> dict[str, str]:

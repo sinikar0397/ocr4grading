@@ -1,29 +1,3 @@
-def merge_by_number(exam_questions: list[dict], answer_questions: list[dict]) -> list[dict]:
-    """Combine exam-paper questions (question_text) with answer-key questions
-    (answer/explanation) into one draft list, keyed by question number.
-
-    Either side may be missing an entry for a given number (mismatched OCR,
-    typo, etc.) -- those fields just come back as None for the user to fix
-    in the preview/confirm UI.
-    """
-    by_number: dict[str, dict] = {}
-    for eq in exam_questions:
-        number = str(eq["number"])
-        by_number[number] = {
-            "number": number,
-            "question_text": eq.get("question_text"),
-            "answer": None,
-            "explanation": None,
-        }
-    for aq in answer_questions:
-        number = str(aq["number"])
-        entry = by_number.setdefault(number, {"number": number, "question_text": None, "answer": None, "explanation": None})
-        entry["answer"] = aq.get("answer")
-        entry["explanation"] = aq.get("explanation")
-
-    return [by_number[number] for number in sorted(by_number, key=lambda n: (len(n), n))]
-
-
 def pair_questions(student_qs: list[dict], reference_qs: dict[str, str]) -> list[dict]:
     """Match OCR'd student answers to DB reference answers by question number.
 
