@@ -24,7 +24,7 @@ def merge_by_number(exam_questions: list[dict], answer_questions: list[dict]) ->
     return [by_number[number] for number in sorted(by_number, key=lambda n: (len(n), n))]
 
 
-def pair_questions(student_qs: list[dict], reference_qs: dict[str, dict]) -> list[dict]:
+def pair_questions(student_qs: list[dict], reference_qs: dict[str, str]) -> list[dict]:
     """Match OCR'd student answers to DB reference answers by question number.
 
     Questions with no reference answer in the DB are flagged as
@@ -37,16 +37,14 @@ def pair_questions(student_qs: list[dict], reference_qs: dict[str, dict]) -> lis
         ref = reference_qs.get(number)
         base = {
             "number": number,
-            "student_answer": sq.get("answer"),
             "student_solution": sq.get("solution"),
         }
-        if ref is None or not ref.get("correct_answer"):
+        if ref is None:
             pairs.append({**base, "status": "missing_reference"})
         else:
             pairs.append({
                 **base,
                 "status": "to_grade",
-                "correct_answer": ref["correct_answer"],
-                "explanation": ref.get("explanation"),
+                "correct_answer": ref,
             })
     return pairs

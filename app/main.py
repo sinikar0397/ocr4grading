@@ -32,15 +32,14 @@ class ConfirmExamRequest(BaseModel):
     num_questions : int
 
 
-class StudentQuestion(BaseModel):
+class StudentAnswer(BaseModel):
     number: str
-    answer: str | None = None
     solution: str | None = None
 
 
 class GradeRequest(BaseModel):
     exam_id: int
-    questions: list[StudentQuestion]
+    questions: list[StudentAnswer]
 
 @app.get("/subjects")
 def list_subjects(db: Session = Depends(get_db)):
@@ -103,28 +102,13 @@ def structure_questions(exam_id : int, number : int) -> Question:
 
     question_text = run_mineru(question_path)
     answer_text   = run_mineru(answer_path)
-    correct_answer = _chat_json(
-        system_prompt = STRUCTURE_PROMPT_DICT["answer"],
-        payload = f"""
-            시험지 : {question_text}\n\n\n
-            모범답안 : {answer_text}
-            """
-    )
-    explanation = _chat_json(
-        system_prompt = STRUCTURE_PROMPT_DICT["explanation"],
-        payload = f"""
-            시험지 : {question_text}\n\n\n
-            모범답안 : {answer_text}
-            """
-    )
     return Question(
         exam_id = exam_id,
         number = number,
         question_file_path = question_path,
         answer_file_path   = answer_path,
         question_text  = question_text,
-        correct_answer = correct_answer,
-        explanation    = explanation
+        answer_text    = answer_text
     )
     
 
@@ -156,8 +140,7 @@ def confirm_exam(payload: ConfirmExamRequest, db: Session = Depends(get_db)):
 def set_answer(
     exam_id: int,
     number: str,
-    correct_answer: str = Form(...),
-    explanation: str | None = Form(None),
+    answer_text: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
     """Manually fill in or correct one question's answer after registration."""
@@ -168,22 +151,22 @@ def set_answer(
     if question is None:
         question = Question(exam_id=exam_id, number=number)
         db.add(question)
-    question.correct_answer = correct_answer
-    question.explanation = explanation
+    db.answer_text = answer_text
     db.commit()
-    return {"exam_id": exam_id, "number": number, "correct_answer": correct_answer}
+    return {"exam_id": exam_id, "number": number, "answer_text" : answer_text}
 
 
 @app.post("/transcribe")
-def transcribe(file: UploadFile = File(...)):
-    # 수정해야함 structure_question 이상
-    # todo
+def transcribe(number : int = File(...), file: UploadFile = File(...)):
     """OCR a student's solved-exam photo into per-question answers. DB-independent."""
     suffix = Path(file.filename or "").suffix
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(file.file.read())
         text = run_mineru(tmp.name)
-    return {"questions": structure_questions(text)}
+    return {"questions": StudentAnswer(
+        number = number,
+        solution = text
+    )}
 
 
 @app.post("/grade")
@@ -194,7 +177,7 @@ def grade(payload: GradeRequest, db: Session = Depends(get_db)):
         raise HTTPException(404, "exam not found")
 
     reference = {
-        q.number: {"correct_answer": q.correct_answer, "explanation": q.explanation}
+        q.number: q.answer_text
         for q in exam.questions
     }
     student_questions = [q.model_dump() for q in payload.questions]

@@ -19,21 +19,6 @@ def _get_client() -> OpenAI:
     return _client
 
 
-STRUCTURE_PROMPT_DICT = {
-    "answer" :
-"""너는 시험지 OCR 결과를 문제별로 정리하는 도우미다.
-아래는 시험지 및 모범답안을 OCR한 markdown 텍스트다.
-아래 문제의 최종 답을 답안지에서 확인하여 답하라.
-최종 답만 단답으로 답변하고, 부가적인 내용을 답하지 마라.
-증명 문제 등의 경우라 답이 단답으로 기술되지 않는 경우, null을 답하라""",
-    "explanation" :
-"""너는 시험지 OCR 결과를 문제별로 정리하는 도우미다.
-아래는 시험지 및 모범답안을 OCR한 markdown 텍스트다.
-아래 문제의 풀이 과정을 답안지에서 확인하여 답하라.
-풀이 과정만을 답변하고, 부가적인 내용을 답하지 마라.
-풀이 과정이 없다면 null을 반환하라.""",
-}
-
 """
 {"questions": [
   {"number": "문제 번호 (문자열)",
@@ -47,11 +32,11 @@ STRUCTURE_PROMPT_DICT = {
 GRADE_PROMPT_DICT = {
     "is_correct" :
 """너는 채점 도우미다.
-각 문제에 대해 문제 내용, 학생의 답(풀이)와 정답(해설)이 주어진다.
+문제에 대해 문제 내용, 학생의 답(풀이)와 정답(해설)이 주어진다.
 학생의 답이 옳은지를 확인하여, true, false 중 하나의 단어로 답하라.""",
     "feedback" :
 """너는 채점 도우미다.
-각 문제에 대해 문제 내용, 학생의 답(풀이)와 정답(해설)이 주어진다.
+문제에 대해 문제 내용, 학생의 답(풀이)와 정답(해설)이 주어진다.
 학생의 풀이 과정과 정답의 풀이 과정이 같은 의미인지, 혹은 학생의 답이
 논리적으로 맞는 답인지 판단하고 그러지 못할 경우 풀이 과정에서 어디가
 틀렸는지 간단하게 짚어라. 부가적인 내용 없이 해당 내용에 대해 한두문장의 피드백을 반환하라.""",
@@ -68,7 +53,7 @@ def _chat_json(system_prompt: str, payload: str) -> dict:
             {"role": "user", "content": payload},
         ],
     )
-    return json.loads(resp.choices[0].message.content)
+    return resp.choices[0].message.content
 
 
 def grade_pairs(pairs: list[dict]) -> list[dict]:
@@ -76,7 +61,15 @@ def grade_pairs(pairs: list[dict]) -> list[dict]:
     if not to_grade:
         return pairs
 
-    graded = _chat_json(GRADE_PROMPT, json.dumps(to_grade, ensure_ascii=False)).get("results", [])
+
+    graded = [
+        {
+            "number" : g["number"],
+            "is_correct" : _chat_json(GRADE_PROMPT_DICT["is_correct"], json.dumps(g)),
+            "feedback" : _chat_json(GRADE_PROMPT_DICT["feedback"], json.dumps(g))
+        }
+        for g in to_grade
+    ]
     graded_by_number = {g["number"]: g for g in graded}
 
     merged = []

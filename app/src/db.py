@@ -45,8 +45,7 @@ class Question(Base):
     answer_file_path = Column(String)
 
     question_text = Column(Text)
-    correct_answer = Column(Text)
-    explanation = Column(Text)
+    answer_text = Column(Text)
     exam = relationship("Exam", back_populates="questions")
 
 
