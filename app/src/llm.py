@@ -1,7 +1,8 @@
 import json
 import os
+import time
 
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 
 MODEL = os.environ.get("GRADING_MODEL", "gemini-flash-latest")
 
@@ -43,16 +44,25 @@ GRADE_PROMPT_DICT = {
 }
 
 
-def _chat_json(system_prompt: str, payload: str) -> str:
+def _chat_json(system_prompt: str, payload: str, max_retries: int = 5) -> str:
     client = _get_client()
-    resp = client.chat.completions.create(
-        model=MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": payload},
-        ],
-    )
-    return resp.choices[0].message.content
+    for attempt in range(max_retries):
+        try:
+            resp = client.chat.completions.create(
+                model=MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": payload},
+                ],
+            )
+            return resp.choices[0].message.content
+        except RateLimitError as e:
+            # A per-day quota (free tier) won't clear up by waiting a few seconds --
+            # only a short per-minute burst limit is worth retrying.
+            if "PerDay" in str(e) or attempt == max_retries - 1:
+                raise
+            wait_seconds = float(e.response.headers.get("retry-after", 20))
+            time.sleep(wait_seconds)
 
 
 def grade_pairs(pairs: list[dict]) -> list[dict]:

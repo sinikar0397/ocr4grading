@@ -1,3 +1,4 @@
+import io
 import shutil
 import os
 import uuid
@@ -44,6 +45,22 @@ def save_upload_pending_page(preview_id: str, field: str, index: int, page: PdfP
     dest = directory / f"{field}_{index}.png"
     page.render(scale=2).to_pil().save(dest)
     return dest
+
+def save_upload_pending_photo(preview_id: str, field: str, index: int, content: bytes) -> Path:
+    """Save an already-image upload (a student's answer-sheet photo, no PDF splitting
+    involved) under data/_pending/<preview_id>/pages/<field>_<index>.png."""
+    directory = pending_page_dir(preview_id)
+    directory.mkdir(parents=True, exist_ok=True)
+    dest = directory / f"{field}_{index}.png"
+    Image.open(io.BytesIO(content)).convert("RGB").save(dest)
+    return dest
+
+def rotate_pending_page(preview_id: str, field: str, index: int) -> Path:
+    """Rotate a saved pending page image 90° clockwise in place (phone photos sometimes
+    upload sideways; this lets the crop UI fix it before cropping)."""
+    path = pending_page_dir(preview_id) / f"{field}_{index}.png"
+    Image.open(path).rotate(-90, expand=True).save(path)
+    return path
 
 def read_pending_page(preview_id: str, field: str, index: int) -> Image:
     """read data/_pending/<preview_id>/pages/<filed>_page_<index>.png"""

@@ -1,113 +1,213 @@
-<h2>채점</h2>
-
-<div>
-  <label>과목
-    <select id="subjectSelect"><option value="">선택</option></select>
-  </label>
-  <label>시험
-    <select id="examSelect" disabled><option value="">과목 먼저 선택</option></select>
-  </label>
+<link rel="stylesheet" href="/static/style.css">
+<div class="topbar">
+  <a class="brand" href="/static/index.html">시험 채점</a>
+  <span class="club-tag">LTE-ANN</span>
 </div>
-<pre id="examStatus"></pre>
 
-<div id="transcribeArea" style="display:none">
-  <h3 id="transcribeTitle"></h3>
+<div class="page">
+  <h1>답안 제출</h1>
+  <p class="subtitle">답안지 사진을 올린 뒤 문제마다 영역만 지정하면 자동으로 인식해서, 등록된 정답과 비교해 채점해줘요.</p>
 
-  <div>
-    <label>사진 선택 (문제별로 따로 찍거나, 한 장에 여러 문제가 있으면 영역만 다시 지정)
-      <input type="file" id="photoInput" accept="image/*" capture="environment">
-    </label>
+  <div class="stepper" id="stepper">
+    <div class="step is-current" data-step="pick"><span class="dot">1</span>시험 선택</div>
+    <div class="connector"></div>
+    <div class="step" data-step="submit"><span class="dot">2</span>답안 제출</div>
+    <div class="connector"></div>
+    <div class="step" data-step="result"><span class="dot">3</span>결과 확인</div>
   </div>
 
-  <div id="cropWorkArea" style="display:none">
-    <p>이미지 위에서 드래그해서 이 문제의 답 영역을 지정하세요. 사진 한 장이 문제 하나뿐이면 "전체 이미지 사용"을 누르세요.</p>
-    <div id="imgWrap" style="position:relative; display:inline-block; border:1px solid #ccc;">
-      <img id="sourceImg" draggable="false" style="max-width:700px; display:block; user-select:none;">
-      <div id="selBox" style="position:absolute; border:2px solid #e03131; background:rgba(224,49,49,0.15); display:none; pointer-events:none;"></div>
+  <div id="pickArea" class="card">
+    <div class="field">
+      <label>과목</label>
+      <select id="subjectSelect"><option value="">선택</option></select>
     </div>
-    <div>
-      <button type="button" id="useFullBtn">전체 이미지 사용</button>
-      <button type="button" id="transcribeBtn" disabled>이 영역으로 전사</button>
-      <button type="button" id="skipBtn">건너뛰기</button>
+    <div class="field">
+      <label>시험</label>
+      <select id="examSelect" disabled><option value="">과목 먼저 선택</option></select>
+    </div>
+    <p class="hint">찾는 시험이 없나요? <a class="link" href="/static/exam_adding.html">먼저 등록하기 →</a></p>
+  </div>
+  <pre class="status" id="examStatus"></pre>
+
+  <div id="transcribeArea" style="display:none">
+
+    <div id="uploadPagesStage" class="card">
+      <h3>답안지 사진 업로드</h3>
+      <p class="hint">답안지를 촬영한 사진을 전부 올리세요 (여러 장 가능). 이후 문제마다 영역만 지정하면 돼요.</p>
+      <div class="field">
+        <label>사진 선택 (여러 장 가능)</label>
+        <label class="file-input">
+          <input type="file" id="pagesInput" accept="image/*" multiple>
+          <span class="file-input-btn">사진 선택</span>
+          <span class="file-input-name">선택된 사진 없음</span>
+        </label>
+      </div>
+      <button type="button" class="btn btn-primary btn-block" id="uploadPagesBtn" disabled>업로드하고 계속</button>
+      <pre class="status" id="uploadPagesStatus"></pre>
+    </div>
+
+    <div id="questionLoop" style="display:none">
+      <div class="progress-label" id="progressLabel"></div>
+      <div class="progress-track"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+      <div class="qdots" id="qDots"></div>
+
+      <div class="card">
+        <h3 id="transcribeTitle"></h3>
+
+        <div id="cropStage">
+          <div class="page-nav">
+            <button type="button" class="btn btn-ghost" id="prevSubPage">← 이전 사진</button>
+            <span id="subPageLabel"></span>
+            <button type="button" class="btn btn-ghost" id="nextSubPage">다음 사진 →</button>
+            <button type="button" class="btn btn-ghost" id="rotateSubPage" title="사진이 옆으로 뒤집혀 올라왔다면 눌러서 돌리세요">↻ 90도 회전</button>
+          </div>
+          <p class="hint">이미지 위에서 드래그해서 이 문제의 답 영역을 지정하세요. 답이 여러 곳에 걸쳐 있으면 "이 영역 추가"를 여러 번 눌러 이어붙일 수 있습니다.</p>
+          <div class="crop-frame" id="imgWrap">
+            <img id="sourceImg" draggable="false">
+            <div class="sel-box" id="selBox"></div>
+          </div>
+          <div class="btn-row" style="margin-top:14px">
+            <button type="button" class="btn btn-ghost" id="useFullBtn">이 사진 전체 사용</button>
+            <button type="button" class="btn btn-ghost" id="cropAddBtn" disabled>이 영역 추가</button>
+          </div>
+          <div class="btn-row" style="margin-top:8px">
+            <button type="button" class="btn btn-accent" id="transcribeBtn" disabled>전사하기 →</button>
+            <button type="button" class="btn btn-ghost" id="skipBtn">건너뛰기</button>
+          </div>
+        </div>
+
+        <div id="previewStage" style="display:none">
+          <div class="ocr-preview">
+            <div class="caption">인식된 답안 — 틀리게 읽힌 부분은 직접 고치세요</div>
+            <textarea id="ocrText" rows="6"></textarea>
+          </div>
+          <div class="btn-row">
+            <button type="button" class="btn btn-ghost" id="retakeBtn">영역 다시 지정</button>
+            <button type="button" class="btn btn-accent" id="confirmTaskBtn">확인, 다음 문항 →</button>
+          </div>
+        </div>
+
+        <pre class="status" id="transcribeStatus"></pre>
+        <div class="loading-bar" id="transcribeLoading"></div>
+      </div>
+
+      <button type="button" class="btn btn-primary btn-block" id="gradeBtn" style="display:none;margin-top:20px">채점하기</button>
     </div>
   </div>
-  <pre id="transcribeStatus"></pre>
 
-  <h4>진행 상황</h4>
-  <ul id="taskList"></ul>
+  <pre class="status" id="gradeStatus"></pre>
+  <div class="loading-bar" id="gradeLoading"></div>
 
-  <button type="button" id="gradeBtn" style="display:none">채점하기</button>
+  <div id="resultArea" style="display:none">
+    <div class="summary-stat" id="summaryStat"></div>
+    <div id="gradeResult"></div>
+  </div>
 </div>
-<pre id="gradeStatus"></pre>
-<div id="gradeResult"></div>
 
 <script src="/static/common.js"></script>
 <script>
 let state = null;
-let sourceImgEl = null; // 현재 로드된 원본 사진 (HTMLImageElement)
 
-async function loadSubjects() {
-  const result = await callApi("/subjects");
-  const select = document.getElementById("subjectSelect");
-  if (!result.ok) {
-    select.innerHTML = '<option value="">과목 목록 로딩 실패</option>';
-    return;
-  }
-  result.body.forEach((s) => {
-    const opt = document.createElement("option");
-    opt.value = s.id;
-    opt.textContent = s.name;
-    select.appendChild(opt);
+function setStep(name) {
+  document.querySelectorAll("#stepper .step").forEach((el) => {
+    el.classList.remove("is-current", "is-done");
+    const order = ["pick", "submit", "result"];
+    if (order.indexOf(el.dataset.step) < order.indexOf(name)) el.classList.add("is-done");
+    if (el.dataset.step === name) el.classList.add("is-current");
   });
 }
-loadSubjects();
 
-document.getElementById("subjectSelect").addEventListener("change", async (e) => {
-  const examSelect = document.getElementById("examSelect");
-  examSelect.innerHTML = '<option value="">선택</option>';
-  examSelect.disabled = !e.target.value;
-  document.getElementById("transcribeArea").style.display = "none";
-  if (!e.target.value) return;
-
-  const result = await callApi(`/subjects/${e.target.value}/exams`);
-  if (!result.ok) {
-    examSelect.innerHTML = '<option value="">시험 목록 로딩 실패</option>';
-    return;
-  }
-  result.body.forEach((ex) => {
-    const opt = document.createElement("option");
-    opt.value = ex.id;
-    opt.dataset.numQuestions = ex.num_questions;
-    opt.textContent = ex.name;
-    examSelect.appendChild(opt);
-  });
-});
-
-document.getElementById("examSelect").addEventListener("change", (e) => {
-  document.getElementById("transcribeArea").style.display = "none";
-  document.getElementById("gradeResult").innerHTML = "";
-  document.getElementById("gradeStatus").textContent = "";
-  if (!e.target.value) return;
-
-  const opt = e.target.selectedOptions[0];
-  const numQuestions = Number(opt.dataset.numQuestions);
-  if (!numQuestions) {
-    showStatus(document.getElementById("examStatus"),
-      { ok: false, status: 0, message: "이 시험은 문항 수 정보가 없습니다." });
-    return;
-  }
-  document.getElementById("examStatus").textContent = "";
-
+function startExam(examId, numQuestions) {
+  document.getElementById("pickArea").style.display = "none";
   const tasks = [];
   for (let n = 0; n < numQuestions; n++) {
-    tasks.push({ number: n, done: false, solution: null });
+    tasks.push({ number: n, done: false, solution: null, boxCount: 0 });
   }
-  state = { exam_id: Number(e.target.value), num_questions: numQuestions, tasks, taskIndex: 0 };
-  sourceImgEl = null;
+  state = { exam_id: examId, num_questions: numQuestions, tasks, taskIndex: 0, submission_id: null, subPages: 0, subPageIndex: 0 };
 
   document.getElementById("transcribeArea").style.display = "block";
-  document.getElementById("gradeBtn").style.display = "none";
-  renderTaskList();
+  setStep("submit");
+  document.getElementById("uploadPagesStage").style.display = "block";
+  document.getElementById("questionLoop").style.display = "none";
+}
+
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get("exam_id") && urlParams.get("num_questions")) {
+  startExam(Number(urlParams.get("exam_id")), Number(urlParams.get("num_questions")));
+} else {
+  async function loadSubjects() {
+    const result = await callApi("/subjects");
+    const select = document.getElementById("subjectSelect");
+    if (!result.ok) {
+      select.innerHTML = '<option value="">과목 목록 로딩 실패</option>';
+      return;
+    }
+    result.body.forEach((s) => {
+      const opt = document.createElement("option");
+      opt.value = s.id;
+      opt.textContent = s.name;
+      select.appendChild(opt);
+    });
+  }
+  loadSubjects();
+
+  document.getElementById("subjectSelect").addEventListener("change", async (e) => {
+    const examSelect = document.getElementById("examSelect");
+    examSelect.innerHTML = '<option value="">선택</option>';
+    examSelect.disabled = !e.target.value;
+    if (!e.target.value) return;
+
+    const result = await callApi(`/subjects/${e.target.value}/exams`);
+    if (!result.ok) {
+      examSelect.innerHTML = '<option value="">시험 목록 로딩 실패</option>';
+      return;
+    }
+    result.body.forEach((ex) => {
+      const opt = document.createElement("option");
+      opt.value = ex.id;
+      opt.dataset.numQuestions = ex.num_questions;
+      opt.textContent = ex.name;
+      examSelect.appendChild(opt);
+    });
+  });
+
+  document.getElementById("examSelect").addEventListener("change", (e) => {
+    if (!e.target.value) return;
+    const opt = e.target.selectedOptions[0];
+    const numQuestions = Number(opt.dataset.numQuestions);
+    if (!numQuestions) {
+      setStatus(document.getElementById("examStatus"), "err", "이 시험은 문항 수 정보가 없습니다.");
+      return;
+    }
+    startExam(Number(e.target.value), numQuestions);
+  });
+}
+
+document.getElementById("pagesInput").addEventListener("change", (e) => {
+  document.getElementById("uploadPagesBtn").disabled = e.target.files.length === 0;
+});
+
+document.getElementById("uploadPagesBtn").addEventListener("click", async () => {
+  const files = document.getElementById("pagesInput").files;
+  const body = new FormData();
+  for (const f of files) body.append("files", f);
+
+  const statusEl = document.getElementById("uploadPagesStatus");
+  setStatus(statusEl, "pending", "업로드 중...");
+
+  const result = await callApi("/submit/pages", { method: "POST", body });
+  if (!result.ok) {
+    showStatus(statusEl, result);
+    return;
+  }
+  statusEl.classList.remove("is-visible");
+  state.submission_id = result.body.submission_id;
+  state.subPages = result.body.num_pages;
+  state.subPageIndex = 0;
+
+  document.getElementById("uploadPagesStage").style.display = "none";
+  document.getElementById("questionLoop").style.display = "block";
+  renderProgress();
   loadTask();
 });
 
@@ -115,39 +215,82 @@ function currentTask() {
   return state.tasks[state.taskIndex];
 }
 
-function loadTask() {
-  const task = currentTask();
-  renderTaskList();
-  if (!task) {
-    document.getElementById("transcribeTitle").textContent = "모든 문항 전사 완료";
-    document.getElementById("cropWorkArea").style.display = "none";
-    document.getElementById("gradeBtn").style.display = "inline-block";
-    return;
-  }
-  document.getElementById("transcribeTitle").textContent = `문제 ${task.number + 1} / ${state.num_questions} 답 전사`;
-  document.getElementById("gradeBtn").style.display = "none";
-  if (sourceImgEl) {
-    document.getElementById("cropWorkArea").style.display = "block";
-    hideSelection();
-  } else {
-    document.getElementById("cropWorkArea").style.display = "none";
-  }
+function renderProgress() {
+  const done = state.tasks.filter((t) => t.done).length;
+  document.getElementById("progressLabel").textContent = `${done} / ${state.num_questions} 문항 완료`;
+  document.getElementById("progressFill").style.width = `${(done / state.num_questions) * 100}%`;
+
+  const dots = document.getElementById("qDots");
+  dots.innerHTML = "";
+  state.tasks.forEach((t, i) => {
+    const el = document.createElement("div");
+    el.className = "q" + (t.done ? " is-done" : "") + (i === state.taskIndex ? " is-current" : "");
+    el.textContent = t.number + 1;
+    el.title = t.done ? "완료" : "대기";
+    el.addEventListener("click", () => { state.taskIndex = i; loadTask(); });
+    dots.appendChild(el);
+  });
 }
 
-document.getElementById("photoInput").addEventListener("change", (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
+function loadTask() {
+  const task = currentTask();
+  renderProgress();
+  document.getElementById("transcribeStatus").className = "status";
+  if (!task) {
+    document.querySelector("#questionLoop .card").style.display = "none";
+    document.getElementById("gradeBtn").style.display = "block";
+    return;
+  }
+  document.querySelector("#questionLoop .card").style.display = "block";
+  document.getElementById("gradeBtn").style.display = "none";
+  document.getElementById("transcribeTitle").textContent = `문제 ${task.number + 1} / ${state.num_questions} 답 지정`;
+  document.getElementById("cropStage").style.display = "block";
+  document.getElementById("previewStage").style.display = "none";
+  document.getElementById("transcribeBtn").disabled = task.boxCount === 0;
+  hideSelection();
+  loadPage();
+}
+
+function loadPage() {
   const img = document.getElementById("sourceImg");
-  img.onload = () => { sourceImgEl = img; loadTask(); };
-  img.src = URL.createObjectURL(file);
+  img.src = `/submit/${state.submission_id}/pages/${state.subPageIndex}?t=${Date.now()}`;
+  document.getElementById("subPageLabel").textContent = `사진 ${state.subPageIndex + 1} / ${state.subPages}`;
+}
+
+document.getElementById("prevSubPage").addEventListener("click", () => {
+  state.subPageIndex = Math.max(0, state.subPageIndex - 1);
+  hideSelection();
+  loadPage();
+});
+document.getElementById("nextSubPage").addEventListener("click", () => {
+  state.subPageIndex = Math.min(state.subPages - 1, state.subPageIndex + 1);
+  hideSelection();
+  loadPage();
 });
 
-// 드래그로 영역 선택 (exam_adding.html과 동일한 방식)
+document.getElementById("rotateSubPage").addEventListener("click", async () => {
+  const body = new FormData();
+  body.append("submission_id", state.submission_id);
+  body.append("page_index", state.subPageIndex);
+
+  const statusEl = document.getElementById("transcribeStatus");
+  setStatus(statusEl, "pending", "회전 중...");
+
+  const result = await callApi("/submit/rotate", { method: "POST", body });
+  if (!result.ok) {
+    showStatus(statusEl, result);
+    return;
+  }
+  statusEl.classList.remove("is-visible");
+  hideSelection();
+  loadPage();
+});
+
 const imgWrap = document.getElementById("imgWrap");
 const pageImg = document.getElementById("sourceImg");
 const selBox = document.getElementById("selBox");
 let dragStart = null;
-let selection = null; // 화면에 표시된 픽셀 기준 {x, y, w, h}
+let selection = null;
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
@@ -176,7 +319,7 @@ imgWrap.addEventListener("mousemove", (e) => {
 window.addEventListener("mouseup", () => {
   if (!dragStart) return;
   dragStart = null;
-  document.getElementById("transcribeBtn").disabled = !(selection && selection.w > 3 && selection.h > 3);
+  document.getElementById("cropAddBtn").disabled = !(selection && selection.w > 3 && selection.h > 3);
 });
 
 function updateSelBox() {
@@ -188,48 +331,78 @@ function updateSelBox() {
 function hideSelection() {
   selection = null;
   selBox.style.display = "none";
-  document.getElementById("transcribeBtn").disabled = true;
+  document.getElementById("cropAddBtn").disabled = true;
 }
+
+async function submitCrop(box) {
+  const task = currentTask();
+  const scale = pageImg.naturalWidth / pageImg.clientWidth;
+
+  const body = new FormData();
+  body.append("submission_id", state.submission_id);
+  body.append("number", task.number);
+  body.append("page_index", state.subPageIndex);
+  body.append("x", Math.round(box.x * scale));
+  body.append("y", Math.round(box.y * scale));
+  body.append("w", Math.round(box.w * scale));
+  body.append("h", Math.round(box.h * scale));
+
+  const statusEl = document.getElementById("transcribeStatus");
+  setStatus(statusEl, "pending", "저장 중...");
+
+  const result = await callApi("/submit/crop", { method: "POST", body });
+  if (!result.ok) {
+    showStatus(statusEl, result);
+    return;
+  }
+  statusEl.classList.remove("is-visible");
+  task.boxCount++;
+  document.getElementById("transcribeBtn").disabled = false;
+  hideSelection();
+}
+
+document.getElementById("cropAddBtn").addEventListener("click", () => submitCrop(selection));
 
 document.getElementById("useFullBtn").addEventListener("click", () => {
-  selection = { x: 0, y: 0, w: pageImg.clientWidth, h: pageImg.clientHeight };
-  selBox.style.display = "block";
-  updateSelBox();
-  document.getElementById("transcribeBtn").disabled = false;
+  submitCrop({ x: 0, y: 0, w: pageImg.clientWidth, h: pageImg.clientHeight });
 });
-
-function cropToBlob(img, box) {
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(box.w));
-  canvas.height = Math.max(1, Math.round(box.h));
-  canvas.getContext("2d").drawImage(img, box.x, box.y, box.w, box.h, 0, 0, canvas.width, canvas.height);
-  return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-}
 
 document.getElementById("transcribeBtn").addEventListener("click", async () => {
   const task = currentTask();
-  const scale = pageImg.naturalWidth / pageImg.clientWidth;
-  const box = {
-    x: selection.x * scale, y: selection.y * scale,
-    w: selection.w * scale, h: selection.h * scale,
-  };
-  const blob = await cropToBlob(pageImg, box);
-
   const body = new FormData();
+  body.append("submission_id", state.submission_id);
   body.append("number", task.number);
-  body.append("file", blob, `q${task.number}.png`);
 
   const statusEl = document.getElementById("transcribeStatus");
-  statusEl.textContent = "전사 중... (OCR, 시간이 걸릴 수 있음)";
-  statusEl.style.color = "";
-  statusEl.style.background = "";
+  const transcribeBtn = document.getElementById("transcribeBtn");
+  setStatus(statusEl, "pending", "전사 중... OCR이라 시간이 걸릴 수 있어요");
+  transcribeBtn.disabled = true;
+  const stopLoading = startLoadingBar(document.getElementById("transcribeLoading"), "사진 한 장당 수십 초 걸릴 수 있어요");
 
   const result = await callApi("/transcribe", { method: "POST", body });
-  showStatus(statusEl, result, "전사 완료");
-  if (!result.ok) return;
+  stopLoading();
+  transcribeBtn.disabled = false;
+  if (!result.ok) {
+    showStatus(statusEl, result);
+    return;
+  }
+  statusEl.classList.remove("is-visible");
+  task.solution = result.body.answer.solution ?? "";
+  document.getElementById("ocrText").value = task.solution;
+  document.getElementById("cropStage").style.display = "none";
+  document.getElementById("previewStage").style.display = "block";
+});
 
+document.getElementById("retakeBtn").addEventListener("click", () => {
+  document.getElementById("previewStage").style.display = "none";
+  document.getElementById("cropStage").style.display = "block";
+  hideSelection();
+});
+
+document.getElementById("confirmTaskBtn").addEventListener("click", () => {
+  const task = currentTask();
+  task.solution = document.getElementById("ocrText").value;
   task.done = true;
-  task.solution = result.body.answer.solution;
   state.taskIndex++;
   loadTask();
 });
@@ -239,30 +412,15 @@ document.getElementById("skipBtn").addEventListener("click", () => {
   loadTask();
 });
 
-function renderTaskList() {
-  const ul = document.getElementById("taskList");
-  ul.innerHTML = "";
-  state.tasks.forEach((t, i) => {
-    const li = document.createElement("li");
-    li.textContent = `문제 ${t.number + 1} : ${t.done ? "완료" : "대기"}`;
-    li.style.cursor = "pointer";
-    li.style.color = t.done ? "#0a7a2f" : (i === state.taskIndex ? "#0057cc" : "#666");
-    li.style.fontWeight = i === state.taskIndex ? "bold" : "normal";
-    li.addEventListener("click", () => {
-      state.taskIndex = i;
-      loadTask();
-    });
-    ul.appendChild(li);
-  });
-}
-
 document.getElementById("gradeBtn").addEventListener("click", async () => {
   const statusEl = document.getElementById("gradeStatus");
-  const container = document.getElementById("gradeResult");
-  container.innerHTML = "";
-  statusEl.textContent = "채점 요청 중...";
-  statusEl.style.color = "";
-  statusEl.style.background = "";
+  const gradeBtn = document.getElementById("gradeBtn");
+  setStatus(statusEl, "pending", "채점 요청 중... 문항마다 LLM을 2번씩 불러서 시간이 걸려요");
+  gradeBtn.disabled = true;
+  const stopLoading = startLoadingBar(
+    document.getElementById("gradeLoading"),
+    "API 요청이 몰리면 잠시 대기 후 재시도해요"
+  );
 
   const questions = state.tasks
     .filter((t) => t.done)
@@ -273,20 +431,55 @@ document.getElementById("gradeBtn").addEventListener("click", async () => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ exam_id: state.exam_id, questions }),
   });
-  showStatus(statusEl, result, "채점 완료");
-  if (!result.ok) return;
-
-  result.body.results.forEach((q) => {
-    const row = document.createElement("p");
-    row.style.padding = "6px";
-    if (q.status === "missing_reference") {
-      row.textContent = `${Number(q.number) + 1}번: DB에 정답 없음 (직접 입력 필요)`;
-      row.style.background = "#fff4dd";
-    } else {
-      row.textContent = `${Number(q.number) + 1}번: ${q.is_correct ? "정답" : "오답"} - ${q.feedback ?? ""}`;
-      row.style.background = q.is_correct ? "#eafbf0" : "#fdeaea";
-    }
-    container.appendChild(row);
-  });
+  stopLoading();
+  gradeBtn.disabled = false;
+  if (!result.ok) {
+    showStatus(statusEl, result);
+    return;
+  }
+  statusEl.classList.remove("is-visible");
+  setStep("result");
+  document.getElementById("transcribeArea").style.display = "none";
+  renderResults(result.body.results);
 });
+
+function renderResults(results) {
+  const correctCount = results.filter((q) => q.is_correct).length;
+  const gradedCount = results.filter((q) => q.status !== "missing_reference").length;
+
+  const summary = document.getElementById("summaryStat");
+  summary.innerHTML = "";
+  [
+    { num: `${correctCount} / ${gradedCount}`, label: "정답 개수" },
+    { num: results.length, label: "제출한 문항" },
+  ].forEach(({ num, label }) => {
+    const item = document.createElement("div");
+    item.className = "item";
+    item.innerHTML = `<div class="num">${num}</div><div class="label">${label}</div>`;
+    summary.appendChild(item);
+  });
+
+  const container = document.getElementById("gradeResult");
+  container.innerHTML = "";
+  results
+    .slice()
+    .sort((a, b) => Number(a.number) - Number(b.number))
+    .forEach((q) => {
+      const row = document.createElement("div");
+      if (q.status === "missing_reference") {
+        row.className = "result-row";
+        row.innerHTML = `<div class="num">${Number(q.number) + 1}번</div><div class="feedback">DB에 정답이 없어 채점할 수 없어요.</div>`;
+      } else {
+        row.className = "result-row " + (q.is_correct ? "correct" : "wrong");
+        row.innerHTML = `
+          <div class="num">${Number(q.number) + 1}번</div>
+          <div style="flex:1">
+            <div class="tag">${q.is_correct ? "정답" : "오답"}</div>
+            <div class="feedback">${q.feedback ?? ""}</div>
+          </div>`;
+      }
+      container.appendChild(row);
+    });
+  document.getElementById("resultArea").style.display = "block";
+}
 </script>
