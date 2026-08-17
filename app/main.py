@@ -1,7 +1,5 @@
-import tempfile
-from pathlib import Path
 import pypdfium2 as pdfium
-import glob
+from openai import RateLimitError
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -15,7 +13,8 @@ from .src.matching import pair_questions
 from .src.ocr import run_mineru
 from .src.storage import new_preview_id, promote_to_exam,\
     save_upload_pending_exam, save_upload_pending_page,\
-    read_pending_page, save_upload_pending_question, exam_dir, pending_page_dir
+    read_pending_page, save_upload_pending_question, exam_dir, pending_page_dir,\
+    save_upload_pending_photo, pending_question_dir, rotate_pending_page
 
 app = FastAPI(title="Exam Grading Service")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -171,13 +170,56 @@ def set_answer(
     return {"exam_id": exam_id, "number": number, "answer_text" : answer_text}
 
 
+@app.post("/submit/pages")
+def submit_pages(files: list[UploadFile] = File(...)):
+    """Upload one or more photos of a student's whole answer sheet, to be cropped per-question next (DB-independent)."""
+    submission_id = new_preview_id()
+    for index, f in enumerate(files):
+        save_upload_pending_photo(submission_id, "answer", index, f.file.read())
+    return {"submission_id": submission_id, "num_pages": len(files)}
+
+
+@app.get("/submit/{submission_id}/pages/{page_index}")
+def get_submission_page(submission_id: str, page_index: int):
+    """Serve one uploaded answer-sheet photo so the crop UI can page through it."""
+    path = pending_page_dir(submission_id) / f"answer_{page_index}.png"
+    if not path.exists():
+        raise HTTPException(404, "page not found")
+    return FileResponse(path)
+
+
+@app.post("/submit/rotate")
+def rotate_submission_page(submission_id: str = Form(...), page_index: int = Form(...)):
+    """Rotate one uploaded answer-sheet photo 90° clockwise in place (phone photos sometimes upload sideways)."""
+    rotate_pending_page(submission_id, "answer", page_index)
+    return {"ok": True}
+
+
+@app.post("/submit/crop")
+def crop_submission(
+    submission_id: str = Form(...),
+    number: int = Form(...),
+    page_index: int = Form(...),
+    x: int = Form(...),
+    y: int = Form(...),
+    w: int = Form(...),
+    h: int = Form(...),
+):
+    """Crop question `number`'s answer out of photo `page_index`. Repeated calls stack (see save_upload_pending_question)."""
+    base_image = read_pending_page(submission_id, "answer", page_index)
+    box = [x, y, x + w, y + h]
+    crop_image = base_image.crop(box)
+    dest = save_upload_pending_question(submission_id, "answer", number, crop_image)
+    return {"path": str(dest)}
+
+
 @app.post("/transcribe")
-def transcribe(number : int = File(...), file: UploadFile = File(...)):
-    """OCR a student's solved-exam photo into per-question answers. DB-independent."""
-    suffix = Path(file.filename or "").suffix
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(file.file.read())
-        text = run_mineru(tmp.name)
+def transcribe(submission_id: str = Form(...), number: int = Form(...)):
+    """OCR one already-cropped question image from a student submission. DB-independent."""
+    path = pending_question_dir(submission_id) / f"answer_{number}.png"
+    if not path.exists():
+        raise HTTPException(404, "no cropped region saved for this question yet")
+    text = run_mineru(str(path))
     return {"answer": StudentAnswer(
         number = str(number),
         solution = text
@@ -197,7 +239,10 @@ def grade(payload: GradeRequest, db: Session = Depends(get_db)):
     }
     student_questions = [q.model_dump() for q in payload.questions]
     pairs = pair_questions(student_questions, reference)
-    results = grade_pairs(pairs)
+    try:
+        results = grade_pairs(pairs)
+    except RateLimitError:
+        raise HTTPException(429, "Gemini API 요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요 (무료 티어는 분당/일일 요청 수 제한이 있습니다).")
     return {"exam_id": payload.exam_id, "results": results}
 
 

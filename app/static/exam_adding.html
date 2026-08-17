@@ -1,56 +1,105 @@
-<h2>시험 등록</h2>
+<link rel="stylesheet" href="/static/style.css">
+<div class="topbar">
+  <a class="brand" href="/static/index.html">시험 채점</a>
+  <span class="club-tag">LTE-ANN</span>
+</div>
 
-<form id="uploadForm">
-  <input type="text" name="subject_name" placeholder="과목명" required>
-  <input type="text" name="exam_name" placeholder="시험명" required>
-  <input type="number" name="num_questions" placeholder="총 문제 수" min="1" required>
-  <label>시험지 파일 <input type="file" name="exam_file" accept="application/pdf" required></label>
-  <label>정답지 파일 <input type="file" name="answer_file" accept="application/pdf" required></label>
-  <button type="submit">업로드</button>
-</form>
-<pre id="uploadStatus"></pre>
+<div class="page">
+  <h1>시험지 등록</h1>
+  <p class="subtitle">이미 등록된 시험이면 이 단계는 건너뛰고 바로 답안 제출로 가세요.</p>
 
-<div id="cropArea" style="display:none">
-  <h3 id="cropTitle"></h3>
-
-  <div id="cropWorkArea">
-    <div>
-      <button type="button" id="prevPage">← 이전 페이지</button>
-      <span id="pageLabel"></span>
-      <button type="button" id="nextPage">다음 페이지 →</button>
-    </div>
-    <p>이미지 위에서 드래그해서 문항 영역을 지정하세요. 발문과 문제가 떨어져 있으면 "이 영역 추가"를 여러 번 눌러서 이어붙일 수 있습니다 (페이지를 넘겨서 다른 곳을 추가해도 됩니다).</p>
-    <div id="imgWrap" style="position:relative; display:inline-block; border:1px solid #ccc;">
-      <img id="pageImg" draggable="false" style="max-width:700px; display:block; user-select:none;">
-      <div id="selBox" style="position:absolute; border:2px solid #e03131; background:rgba(224,49,49,0.15); display:none; pointer-events:none;"></div>
-    </div>
-    <div>
-      <button type="button" id="cropBtn" disabled>이 영역 추가</button>
-      <button type="button" id="nextTaskBtn" style="display:none">다음 문항 →</button>
-      <button type="button" id="skipBtn">건너뛰기</button>
-    </div>
-    <pre id="cropStatus"></pre>
+  <div class="stepper" id="stepper">
+    <div class="step is-current" data-step="upload"><span class="dot">1</span>업로드</div>
+    <div class="connector"></div>
+    <div class="step" data-step="crop"><span class="dot">2</span>문항 지정</div>
+    <div class="connector"></div>
+    <div class="step" data-step="confirm"><span class="dot">3</span>확정</div>
   </div>
 
-  <h4>진행 상황</h4>
-  <ul id="taskList"></ul>
+  <form id="uploadForm" class="card">
+    <div class="field">
+      <label>과목명</label>
+      <input type="text" name="subject_name" placeholder="예: 수학" required>
+    </div>
+    <div class="field">
+      <label>시험명</label>
+      <input type="text" name="exam_name" placeholder="예: 2026년 1학기 중간고사" required>
+    </div>
+    <div class="field">
+      <label>총 문제 수</label>
+      <input type="number" name="num_questions" min="1" required>
+    </div>
+    <div class="field">
+      <label>시험지 파일 (PDF)</label>
+      <label class="file-input">
+        <input type="file" name="exam_file" accept="application/pdf" required>
+        <span class="file-input-btn">파일 선택</span>
+        <span class="file-input-name">선택된 파일 없음</span>
+      </label>
+    </div>
+    <div class="field">
+      <label>정답지 파일 (PDF)</label>
+      <label class="file-input">
+        <input type="file" name="answer_file" accept="application/pdf" required>
+        <span class="file-input-btn">파일 선택</span>
+        <span class="file-input-name">선택된 파일 없음</span>
+      </label>
+    </div>
+    <button type="submit" class="btn btn-primary btn-block">업로드하고 계속</button>
+  </form>
+  <pre class="status" id="uploadStatus"></pre>
 
-  <button type="button" id="confirmBtn" style="display:none">시험 등록 확정</button>
-  <pre id="confirmStatus"></pre>
+  <div id="cropArea" style="display:none">
+    <div class="card">
+      <h3 id="cropTitle"></h3>
+      <div class="page-nav">
+        <button type="button" class="btn btn-ghost" id="prevPage">← 이전 페이지</button>
+        <span id="pageLabel"></span>
+        <button type="button" class="btn btn-ghost" id="nextPage">다음 페이지 →</button>
+      </div>
+      <p class="hint">이미지 위에서 드래그해서 문항 영역을 지정하세요. 발문과 문제가 떨어져 있으면 "이 영역 추가"를 여러 번 눌러서 이어붙일 수 있습니다.</p>
+      <div class="crop-frame" id="imgWrap">
+        <img id="pageImg" draggable="false">
+        <div class="sel-box" id="selBox"></div>
+      </div>
+      <div class="btn-row" style="margin-top:14px">
+        <button type="button" class="btn btn-ghost" id="cropBtn" disabled>이 영역 추가</button>
+        <button type="button" class="btn btn-accent" id="nextTaskBtn" style="display:none">다음 문항 →</button>
+        <button type="button" class="btn btn-ghost" id="skipBtn">건너뛰기</button>
+      </div>
+      <pre class="status" id="cropStatus"></pre>
+    </div>
+
+    <h3 style="margin-top:24px">시험지 문항</h3>
+    <div class="qdots" id="examDots"></div>
+    <h3>정답지 문항</h3>
+    <div class="qdots" id="answerDots"></div>
+
+    <button type="button" class="btn btn-primary btn-block" id="confirmBtn" style="display:none;margin-top:20px">시험 등록 확정</button>
+    <pre class="status" id="confirmStatus"></pre>
+    <div class="loading-bar" id="confirmLoading"></div>
+  </div>
 </div>
 
 <script src="/static/common.js"></script>
 <script>
 let state = null;
 
+function setStep(name) {
+  document.querySelectorAll("#stepper .step").forEach((el) => {
+    el.classList.remove("is-current", "is-done");
+    const order = ["upload", "crop", "confirm"];
+    if (order.indexOf(el.dataset.step) < order.indexOf(name)) el.classList.add("is-done");
+    if (el.dataset.step === name) el.classList.add("is-current");
+  });
+}
+
 document.getElementById("uploadForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const formData = new FormData(e.target);
   const numQuestions = Number(formData.get("num_questions"));
   const statusEl = document.getElementById("uploadStatus");
-  statusEl.textContent = "업로드 중... (PDF를 페이지별로 분리하는 중)";
-  statusEl.style.color = "";
-  statusEl.style.background = "";
+  setStatus(statusEl, "pending", "업로드 중... (PDF를 페이지별로 분리하는 중)");
 
   const result = await callApi("/exams/save", { method: "POST", body: formData });
   showStatus(statusEl, result, "업로드 완료");
@@ -73,8 +122,10 @@ document.getElementById("uploadForm").addEventListener("submit", async (e) => {
     taskIndex: 0,
   };
 
+  document.getElementById("uploadForm").style.display = "none";
   document.getElementById("cropArea").style.display = "block";
-  renderTaskList();
+  setStep("crop");
+  renderDots();
   loadTask();
 });
 
@@ -84,14 +135,15 @@ function currentTask() {
 
 function loadTask() {
   const task = currentTask();
-  renderTaskList();
+  renderDots();
   if (!task) {
     document.getElementById("cropTitle").textContent = "모든 문항 영역 지정 완료";
-    document.getElementById("cropWorkArea").style.display = "none";
-    document.getElementById("confirmBtn").style.display = "inline-block";
+    document.querySelector("#cropArea .card").style.display = "none";
+    document.getElementById("confirmBtn").style.display = "block";
+    setStep("confirm");
     return;
   }
-  document.getElementById("cropWorkArea").style.display = "block";
+  document.querySelector("#cropArea .card").style.display = "block";
   document.getElementById("confirmBtn").style.display = "none";
   document.getElementById("nextTaskBtn").style.display = task.boxCount > 0 ? "inline-block" : "none";
   document.getElementById("cropTitle").textContent =
@@ -122,12 +174,11 @@ document.getElementById("nextPage").addEventListener("click", () => {
   loadPage();
 });
 
-// 드래그로 영역 선택
 const imgWrap = document.getElementById("imgWrap");
 const pageImg = document.getElementById("pageImg");
 const selBox = document.getElementById("selBox");
 let dragStart = null;
-let selection = null; // 화면에 표시된 픽셀 기준 {x, y, w, h}
+let selection = null;
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
@@ -186,9 +237,7 @@ document.getElementById("cropBtn").addEventListener("click", async () => {
   body.append("h", Math.round(selection.h * scale));
 
   const statusEl = document.getElementById("cropStatus");
-  statusEl.textContent = "저장 중...";
-  statusEl.style.color = "";
-  statusEl.style.background = "";
+  setStatus(statusEl, "pending", "저장 중...");
 
   const result = await callApi("/exams/crop", { method: "POST", body });
   showStatus(statusEl, result, "영역 추가 완료");
@@ -196,7 +245,7 @@ document.getElementById("cropBtn").addEventListener("click", async () => {
 
   task.done = true;
   task.boxCount++;
-  loadTask(); // 같은 문항에 머무르며 선택 영역만 초기화 (계속 이어붙이기 가능)
+  loadTask();
 });
 
 document.getElementById("nextTaskBtn").addEventListener("click", () => {
@@ -209,29 +258,39 @@ document.getElementById("skipBtn").addEventListener("click", () => {
   loadTask();
 });
 
-function renderTaskList() {
-  const ul = document.getElementById("taskList");
-  ul.innerHTML = "";
-  state.tasks.forEach((t, i) => {
-    const li = document.createElement("li");
-    const fieldLabel = t.field === "exam" ? "시험지" : "정답지";
-    li.textContent = `문제 ${t.number + 1} - ${fieldLabel} : ${t.done ? `완료 (${t.boxCount}개 영역)` : "대기"}`;
-    li.style.cursor = "pointer";
-    li.style.color = t.done ? "#0a7a2f" : (i === state.taskIndex ? "#0057cc" : "#666");
-    li.style.fontWeight = i === state.taskIndex ? "bold" : "normal";
-    li.addEventListener("click", () => {
-      state.taskIndex = i;
-      loadTask();
-    });
-    ul.appendChild(li);
+function jumpToTask(field, number) {
+  const idx = state.tasks.findIndex((t) => t.field === field && t.number === number);
+  if (idx >= 0) {
+    state.taskIndex = idx;
+    loadTask();
+  }
+}
+
+function renderDots() {
+  ["exam", "answer"].forEach((field) => {
+    const wrap = document.getElementById(field === "exam" ? "examDots" : "answerDots");
+    wrap.innerHTML = "";
+    for (let n = 0; n < state.num_questions; n++) {
+      const task = state.tasks.find((t) => t.field === field && t.number === n);
+      const el = document.createElement("div");
+      el.className = "q" + (task.done ? " is-done" : "") + (task === currentTask() ? " is-current" : "");
+      el.textContent = n + 1;
+      el.title = task.done ? `완료 (${task.boxCount}개 영역)` : "대기";
+      el.addEventListener("click", () => jumpToTask(field, n));
+      wrap.appendChild(el);
+    }
   });
 }
 
 document.getElementById("confirmBtn").addEventListener("click", async () => {
   const statusEl = document.getElementById("confirmStatus");
-  statusEl.textContent = "확정 요청 중... (OCR 처리 중이라 시간이 걸릴 수 있음)";
-  statusEl.style.color = "";
-  statusEl.style.background = "";
+  const confirmBtn = document.getElementById("confirmBtn");
+  setStatus(statusEl, "pending", "확정 요청 중... 문항마다 OCR을 순서대로 돌려서 시간이 걸려요");
+  confirmBtn.disabled = true;
+  const stopLoading = startLoadingBar(
+    document.getElementById("confirmLoading"),
+    `문항 ${state.num_questions}개 × 2(시험지/정답지) OCR을 순서대로 처리 중`
+  );
 
   const result = await callApi("/exams/confirm", {
     method: "POST",
@@ -243,6 +302,19 @@ document.getElementById("confirmBtn").addEventListener("click", async () => {
       num_questions: state.num_questions,
     }),
   });
-  showStatus(statusEl, result, "시험 등록 완료 - 이 exam_id를 채점 화면에서 사용하세요");
+  stopLoading();
+  if (!result.ok) {
+    confirmBtn.disabled = false;
+    showStatus(statusEl, result);
+    return;
+  }
+  setStatus(statusEl, "ok", "시험 등록 완료 - 답안 제출 화면으로 이동합니다...");
+  const params = new URLSearchParams({
+    exam_id: result.body.exam_id,
+    num_questions: state.num_questions,
+    subject_name: state.subject_name,
+    exam_name: state.exam_name,
+  });
+  setTimeout(() => { window.location.href = `/static/grading.html?${params}`; }, 700);
 });
 </script>
