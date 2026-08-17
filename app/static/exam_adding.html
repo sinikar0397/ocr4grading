@@ -1,84 +1,247 @@
 <h2>시험 등록</h2>
 
-<form id="previewForm">
+<form id="uploadForm">
   <input type="text" name="subject_name" placeholder="과목명" required>
   <input type="text" name="exam_name" placeholder="시험명" required>
-  <label>시험지 파일 <input type="file" name="exam_file" required></label>
-  <label>정답지 파일 <input type="file" name="answer_file" required></label>
-  <button type="submit">미리보기</button>
+  <input type="number" name="num_questions" placeholder="총 문제 수" min="1" required>
+  <label>시험지 파일 <input type="file" name="exam_file" accept="application/pdf" required></label>
+  <label>정답지 파일 <input type="file" name="answer_file" accept="application/pdf" required></label>
+  <button type="submit">업로드</button>
 </form>
-<pre id="previewStatus"></pre>
+<pre id="uploadStatus"></pre>
 
-<div id="previewArea" style="display:none">
-  <h3>문항 확인/수정 후 확정</h3>
-  <div id="questionRows"></div>
-  <button id="confirmBtn" type="button">확정</button>
+<div id="cropArea" style="display:none">
+  <h3 id="cropTitle"></h3>
+
+  <div id="cropWorkArea">
+    <div>
+      <button type="button" id="prevPage">← 이전 페이지</button>
+      <span id="pageLabel"></span>
+      <button type="button" id="nextPage">다음 페이지 →</button>
+    </div>
+    <p>이미지 위에서 드래그해서 문항 영역을 지정하세요. 발문과 문제가 떨어져 있으면 "이 영역 추가"를 여러 번 눌러서 이어붙일 수 있습니다 (페이지를 넘겨서 다른 곳을 추가해도 됩니다).</p>
+    <div id="imgWrap" style="position:relative; display:inline-block; border:1px solid #ccc;">
+      <img id="pageImg" draggable="false" style="max-width:700px; display:block; user-select:none;">
+      <div id="selBox" style="position:absolute; border:2px solid #e03131; background:rgba(224,49,49,0.15); display:none; pointer-events:none;"></div>
+    </div>
+    <div>
+      <button type="button" id="cropBtn" disabled>이 영역 추가</button>
+      <button type="button" id="nextTaskBtn" style="display:none">다음 문항 →</button>
+      <button type="button" id="skipBtn">건너뛰기</button>
+    </div>
+    <pre id="cropStatus"></pre>
+  </div>
+
+  <h4>진행 상황</h4>
+  <ul id="taskList"></ul>
+
+  <button type="button" id="confirmBtn" style="display:none">시험 등록 확정</button>
+  <pre id="confirmStatus"></pre>
 </div>
-<pre id="confirmStatus"></pre>
 
 <script src="/static/common.js"></script>
 <script>
-let previewState = null; // { preview_id, subject_name, exam_name }
+let state = null;
 
-document.getElementById("previewForm").addEventListener("submit", async (e) => {
+document.getElementById("uploadForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const formData = new FormData(e.target);
-  const statusEl = document.getElementById("previewStatus");
-  const previewArea = document.getElementById("previewArea");
-
-  statusEl.textContent = "미리보기 요청 중... (MinerU OCR + LLM 구조화, 시간이 걸릴 수 있음)";
+  const numQuestions = Number(formData.get("num_questions"));
+  const statusEl = document.getElementById("uploadStatus");
+  statusEl.textContent = "업로드 중... (PDF를 페이지별로 분리하는 중)";
   statusEl.style.color = "";
   statusEl.style.background = "";
-  previewArea.style.display = "none";
 
-  const result = await callApi("/exams/preview", { method: "POST", body: formData });
-  showStatus(statusEl, result, "미리보기 완료");
+  const result = await callApi("/exams/save", { method: "POST", body: formData });
+  showStatus(statusEl, result, "업로드 완료");
   if (!result.ok) return;
 
-  const data = result.body;
-  previewState = {
-    preview_id: data.preview_id,
-    subject_name: data.subject_name,
-    exam_name: data.exam_name,
+  const tasks = [];
+  for (let n = 0; n < numQuestions; n++) {
+    tasks.push({ number: n, field: "exam", done: false, boxCount: 0 });
+    tasks.push({ number: n, field: "answer", done: false, boxCount: 0 });
+  }
+
+  state = {
+    preview_id: result.body.preview_id,
+    subject_name: formData.get("subject_name"),
+    exam_name: formData.get("exam_name"),
+    num_questions: numQuestions,
+    pages: { exam: result.body.exam_pages, answer: result.body.answer_pages },
+    pageIndex: { exam: 0, answer: 0 },
+    tasks,
+    taskIndex: 0,
   };
 
-  const rows = document.getElementById("questionRows");
-  rows.innerHTML = "";
-  if (!data.questions || data.questions.length === 0) {
-    rows.textContent = "문항을 하나도 못 뽑았습니다. OCR/LLM 결과를 확인하세요.";
-  }
-  (data.questions ?? []).forEach((q) => {
-    const row = document.createElement("fieldset");
-    row.className = "question-row";
-    row.innerHTML = `
-      <legend>문항</legend>
-      <input class="q-number" value="${q.number ?? ""}" placeholder="번호">
-      <textarea class="q-text" placeholder="문항 본문">${q.question_text ?? ""}</textarea>
-      <input class="q-answer" value="${q.answer ?? ""}" placeholder="정답">
-      <textarea class="q-explanation" placeholder="해설">${q.explanation ?? ""}</textarea>
-    `;
-    rows.appendChild(row);
-  });
-  previewArea.style.display = "block";
+  document.getElementById("cropArea").style.display = "block";
+  renderTaskList();
+  loadTask();
 });
+
+function currentTask() {
+  return state.tasks[state.taskIndex];
+}
+
+function loadTask() {
+  const task = currentTask();
+  renderTaskList();
+  if (!task) {
+    document.getElementById("cropTitle").textContent = "모든 문항 영역 지정 완료";
+    document.getElementById("cropWorkArea").style.display = "none";
+    document.getElementById("confirmBtn").style.display = "inline-block";
+    return;
+  }
+  document.getElementById("cropWorkArea").style.display = "block";
+  document.getElementById("confirmBtn").style.display = "none";
+  document.getElementById("nextTaskBtn").style.display = task.boxCount > 0 ? "inline-block" : "none";
+  document.getElementById("cropTitle").textContent =
+    `문제 ${task.number + 1} / ${state.num_questions} - ${task.field === "exam" ? "시험지" : "정답지"} 영역 지정` +
+    (task.boxCount > 0 ? ` (지금까지 ${task.boxCount}개 영역 추가됨)` : "");
+  loadPage();
+}
+
+function loadPage() {
+  const task = currentTask();
+  const img = document.getElementById("pageImg");
+  img.src = `/exams/preview/${state.preview_id}/pages/${task.field}/${state.pageIndex[task.field]}`;
+  document.getElementById("pageLabel").textContent =
+    `페이지 ${state.pageIndex[task.field] + 1} / ${state.pages[task.field]}`;
+  hideSelection();
+}
+
+document.getElementById("prevPage").addEventListener("click", () => {
+  const task = currentTask();
+  if (!task) return;
+  state.pageIndex[task.field] = Math.max(0, state.pageIndex[task.field] - 1);
+  loadPage();
+});
+document.getElementById("nextPage").addEventListener("click", () => {
+  const task = currentTask();
+  if (!task) return;
+  state.pageIndex[task.field] = Math.min(state.pages[task.field] - 1, state.pageIndex[task.field] + 1);
+  loadPage();
+});
+
+// 드래그로 영역 선택
+const imgWrap = document.getElementById("imgWrap");
+const pageImg = document.getElementById("pageImg");
+const selBox = document.getElementById("selBox");
+let dragStart = null;
+let selection = null; // 화면에 표시된 픽셀 기준 {x, y, w, h}
+
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+pageImg.addEventListener("mousedown", (e) => {
+  const rect = pageImg.getBoundingClientRect();
+  dragStart = { x: clamp(e.clientX - rect.left, 0, rect.width), y: clamp(e.clientY - rect.top, 0, rect.height) };
+  selection = { x: dragStart.x, y: dragStart.y, w: 0, h: 0 };
+  selBox.style.display = "block";
+  updateSelBox();
+});
+imgWrap.addEventListener("mousemove", (e) => {
+  if (!dragStart) return;
+  const rect = pageImg.getBoundingClientRect();
+  const curX = clamp(e.clientX - rect.left, 0, rect.width);
+  const curY = clamp(e.clientY - rect.top, 0, rect.height);
+  selection = {
+    x: Math.min(dragStart.x, curX),
+    y: Math.min(dragStart.y, curY),
+    w: Math.abs(curX - dragStart.x),
+    h: Math.abs(curY - dragStart.y),
+  };
+  updateSelBox();
+});
+window.addEventListener("mouseup", () => {
+  if (!dragStart) return;
+  dragStart = null;
+  document.getElementById("cropBtn").disabled = !(selection && selection.w > 3 && selection.h > 3);
+});
+
+function updateSelBox() {
+  selBox.style.left = selection.x + "px";
+  selBox.style.top = selection.y + "px";
+  selBox.style.width = selection.w + "px";
+  selBox.style.height = selection.h + "px";
+}
+function hideSelection() {
+  selection = null;
+  selBox.style.display = "none";
+  document.getElementById("cropBtn").disabled = true;
+}
+
+document.getElementById("cropBtn").addEventListener("click", async () => {
+  const task = currentTask();
+  const scale = pageImg.naturalWidth / pageImg.clientWidth;
+
+  const body = new FormData();
+  body.append("preview_id", state.preview_id);
+  body.append("field", task.field);
+  body.append("number", task.number);
+  body.append("page_index", state.pageIndex[task.field]);
+  body.append("x", Math.round(selection.x * scale));
+  body.append("y", Math.round(selection.y * scale));
+  body.append("w", Math.round(selection.w * scale));
+  body.append("h", Math.round(selection.h * scale));
+
+  const statusEl = document.getElementById("cropStatus");
+  statusEl.textContent = "저장 중...";
+  statusEl.style.color = "";
+  statusEl.style.background = "";
+
+  const result = await callApi("/exams/crop", { method: "POST", body });
+  showStatus(statusEl, result, "영역 추가 완료");
+  if (!result.ok) return;
+
+  task.done = true;
+  task.boxCount++;
+  loadTask(); // 같은 문항에 머무르며 선택 영역만 초기화 (계속 이어붙이기 가능)
+});
+
+document.getElementById("nextTaskBtn").addEventListener("click", () => {
+  state.taskIndex++;
+  loadTask();
+});
+
+document.getElementById("skipBtn").addEventListener("click", () => {
+  state.taskIndex++;
+  loadTask();
+});
+
+function renderTaskList() {
+  const ul = document.getElementById("taskList");
+  ul.innerHTML = "";
+  state.tasks.forEach((t, i) => {
+    const li = document.createElement("li");
+    const fieldLabel = t.field === "exam" ? "시험지" : "정답지";
+    li.textContent = `문제 ${t.number + 1} - ${fieldLabel} : ${t.done ? `완료 (${t.boxCount}개 영역)` : "대기"}`;
+    li.style.cursor = "pointer";
+    li.style.color = t.done ? "#0a7a2f" : (i === state.taskIndex ? "#0057cc" : "#666");
+    li.style.fontWeight = i === state.taskIndex ? "bold" : "normal";
+    li.addEventListener("click", () => {
+      state.taskIndex = i;
+      loadTask();
+    });
+    ul.appendChild(li);
+  });
+}
 
 document.getElementById("confirmBtn").addEventListener("click", async () => {
   const statusEl = document.getElementById("confirmStatus");
-  const questions = [...document.querySelectorAll(".question-row")].map((row) => ({
-    number: row.querySelector(".q-number").value,
-    question_text: row.querySelector(".q-text").value || null,
-    answer: row.querySelector(".q-answer").value || null,
-    explanation: row.querySelector(".q-explanation").value || null,
-  }));
-
-  statusEl.textContent = "확정 요청 중...";
+  statusEl.textContent = "확정 요청 중... (OCR 처리 중이라 시간이 걸릴 수 있음)";
   statusEl.style.color = "";
   statusEl.style.background = "";
 
   const result = await callApi("/exams/confirm", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...previewState, questions }),
+    body: JSON.stringify({
+      preview_id: state.preview_id,
+      subject_name: state.subject_name,
+      exam_name: state.exam_name,
+      num_questions: state.num_questions,
+    }),
   });
   showStatus(statusEl, result, "시험 등록 완료 - 이 exam_id를 채점 화면에서 사용하세요");
 });

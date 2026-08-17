@@ -19,11 +19,7 @@ def _get_client() -> OpenAI:
     return _client
 
 
-STRUCTURE_PROMPT = """\
-너는 시험지 OCR 결과를 문제별로 정리하는 도우미다.
-아래는 시험지 또는 답안지를 OCR한 markdown 텍스트다.
-문제 번호 단위로 나누어 다음 JSON 형식으로만 답하라:
-
+"""
 {"questions": [
   {"number": "문제 번호 (문자열)",
    "question_text": "문제 본문/지문 (시험지 OCR인 경우; 없으면 null)",
@@ -33,32 +29,30 @@ STRUCTURE_PROMPT = """\
 ]}
 """
 
-GRADE_PROMPT = """\
-너는 채점 도우미다. 각 문제에 대해 학생의 답/풀이와 정답/해설이 주어진다.
-학생의 최종 답이 정답과 실질적으로 같은 의미인지 판단하고, 다를 경우 풀이 과정에서
-어디가 틀렸는지 간단히 짚어라. 아래 JSON 형식으로만 답하라:
+GRADE_PROMPT_DICT = {
+    "is_correct" :
+"""너는 채점 도우미다.
+문제에 대해 문제 내용, 학생의 답(풀이)와 정답(해설)이 주어진다.
+학생의 답이 옳은지를 확인하여, true, false 중 하나의 단어로 답하라.""",
+    "feedback" :
+"""너는 채점 도우미다.
+문제에 대해 문제 내용, 학생의 답(풀이)와 정답(해설)이 주어진다.
+학생의 풀이 과정과 정답의 풀이 과정이 같은 의미인지, 혹은 학생의 답이
+논리적으로 맞는 답인지 판단하고 그러지 못할 경우 풀이 과정에서 어디가
+틀렸는지 간단하게 짚어라. 부가적인 내용 없이 해당 내용에 대해 한두문장의 피드백을 반환하라.""",
+}
 
-{"results": [
-  {"number": "문제 번호", "is_correct": true/false, "feedback": "한두 문장 피드백"}
-]}
-"""
 
-
-def _chat_json(system_prompt: str, payload: str) -> dict:
+def _chat_json(system_prompt: str, payload: str) -> str:
     client = _get_client()
     resp = client.chat.completions.create(
         model=MODEL,
-        response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": payload},
         ],
     )
-    return json.loads(resp.choices[0].message.content)
-
-
-def structure_questions(raw_text: str) -> list[dict]:
-    return _chat_json(STRUCTURE_PROMPT, raw_text).get("questions", [])
+    return resp.choices[0].message.content
 
 
 def grade_pairs(pairs: list[dict]) -> list[dict]:
@@ -66,7 +60,15 @@ def grade_pairs(pairs: list[dict]) -> list[dict]:
     if not to_grade:
         return pairs
 
-    graded = _chat_json(GRADE_PROMPT, json.dumps(to_grade, ensure_ascii=False)).get("results", [])
+
+    graded = [
+        {
+            "number" : g["number"],
+            "is_correct" : _chat_json(GRADE_PROMPT_DICT["is_correct"], json.dumps(g)).strip().lower() == "true",
+            "feedback" : _chat_json(GRADE_PROMPT_DICT["feedback"], json.dumps(g))
+        }
+        for g in to_grade
+    ]
     graded_by_number = {g["number"]: g for g in graded}
 
     merged = []
